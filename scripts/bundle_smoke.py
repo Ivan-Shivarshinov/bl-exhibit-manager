@@ -43,6 +43,7 @@ def main():
                 with urlopen(req,timeout=30) as r:
                     content=r.read();return json.loads(content) if 'json' in r.headers.get('Content-Type','') else content
             except HTTPError as exc:
+                time.sleep(.5) # ASGI can finish error logging after sending the 500 response.
                 log=data/'application.log'
                 raise AssertionError(f'{path}: HTTP {exc.code}: '+exc.read().decode(errors='replace')+'\n'+(log.read_text('utf-8',errors='replace')[-16000:] if log.exists() else 'No server log')) from exc
         try:

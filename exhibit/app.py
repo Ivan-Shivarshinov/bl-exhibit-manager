@@ -1,5 +1,6 @@
 """Loopback UI. Translation uses the user's official CLI; credentials stay with that CLI."""
 from pathlib import Path
+import logging
 from urllib.parse import urlparse
 from fastapi import FastAPI, Request, BackgroundTasks
 from fastapi.responses import JSONResponse, Response, FileResponse
@@ -41,7 +42,11 @@ async def local_only(request: Request, call_next):
         return JSONResponse({"detail": "Запрос из другого источника запрещён."}, status_code=403)
     if request.method not in ("GET", "HEAD") and request.headers.get("X-Exhibit-Local") != "1":
         return JSONResponse({"detail": "Требуется локальный запрос интерфейса."}, status_code=403)
-    response = await call_next(request)
+    try:
+        response = await call_next(request)
+    except Exception:
+        logging.getLogger(__name__).exception("Request failed: %s %s", request.method, request.url.path)
+        raise
     response.headers["Cache-Control"] = "no-store"
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["Referrer-Policy"] = "no-referrer"
