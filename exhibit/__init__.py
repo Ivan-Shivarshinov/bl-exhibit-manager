@@ -1,1 +1,3 @@
-"""Local document preparation; document contents never leave this process."""
+"""Local document preparation with explicitly authorized subscription translation."""
+
+__version__ = "0.1.0"

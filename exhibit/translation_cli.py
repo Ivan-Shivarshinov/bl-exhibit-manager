@@ -3,6 +3,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+from .external_process import popen
 import signal
 import subprocess
 import tempfile
@@ -106,7 +107,7 @@ def stop_process(proc):
 def run(args, cwd, prompt="", cancel=None, timeout=180):
     cancel = cancel or threading.Event()
     with tempfile.TemporaryFile() as out, tempfile.TemporaryFile() as err:
-        proc = subprocess.Popen(args, cwd=cwd, env=environment(), stdin=subprocess.PIPE,
+        proc = popen(args, cwd=cwd, env=environment(), stdin=subprocess.PIPE,
                                 stdout=out, stderr=err, start_new_session=os.name != "nt",
                                 creationflags=subprocess.CREATE_NO_WINDOW if os.name == "nt" else 0)
         close_job = windows_job(proc)

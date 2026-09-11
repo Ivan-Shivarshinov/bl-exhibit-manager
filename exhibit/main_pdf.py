@@ -16,6 +16,7 @@ from lxml import etree as E
 from pypdf import PdfReader, PdfWriter
 from pypdf.generic import ArrayObject, BooleanObject, DictionaryObject, NameObject, NumberObject, TextStringObject
 from . import word
+from .external_process import popen
 
 CONVERSION_LOCK = Lock()
 TIMEOUT = 120
@@ -107,7 +108,7 @@ def office_export(source, target, directory, engine):
         (profile / "user").mkdir()
         (profile / "user/registrymodifications.xcu").write_text('''<?xml version="1.0"?><oor:items xmlns:oor="http://openoffice.org/2001/registry"><item oor:path="/org.openoffice.Office.Common/Security/Scripting"><prop oor:name="MacroSecurityLevel" oor:op="fuse"><value>3</value></prop></item><item oor:path="/org.openoffice.Office.Writer/Content/Update"><prop oor:name="Link" oor:op="fuse"><value>2</value></prop></item></oor:items>''', encoding="utf-8")
         command = [engine["executable"], "-env:UserInstallation="+profile.as_uri(), "--headless", "--nologo", "--norestore", "--convert-to", "pdf:writer_pdf_Export", "--outdir", str(target.parent), str(source)]
-    proc = subprocess.Popen(command, cwd=directory, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **flags)
+    proc = popen(command, cwd=directory, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **flags)
     try:
         result = proc.wait(timeout=TIMEOUT)
     except subprocess.TimeoutExpired:

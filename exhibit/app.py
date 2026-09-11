@@ -1,7 +1,7 @@
 """Loopback UI. Translation uses the user's official CLI; credentials stay with that CLI."""
 from pathlib import Path
 from urllib.parse import urlparse
-from fastapi import FastAPI, Request
+from fastapi import FastAPI, Request, BackgroundTasks
 from fastapi.responses import JSONResponse, Response, FileResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
@@ -9,6 +9,7 @@ from .project import Store, LOCK
 from . import pdf
 from .translation import Translations
 from .translation_cli import status as translation_status
+from . import __version__
 
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost"])
@@ -18,7 +19,19 @@ translations = Translations(store)
 
 @app.get("/api/health")
 def health():
-    return {"application": "bl-exhibit-manager", "status": "ok"}
+    return {"application": "bl-exhibit-manager", "status": "ok", "version": __version__}
+
+
+@app.post("/api/application/stop")
+def stop_application(background: BackgroundTasks):
+    stop = getattr(app.state, "stop_server", None)
+    if stop is None:
+        raise ValueError("Этот сервер запущен вручную. Остановите его в исходном терминале через Ctrl+C.")
+    with LOCK:
+        if translations.active:
+            raise ValueError("Сначала дождитесь перевода или остановите его в окне переводчика. Готовые части сохранены.")
+    background.add_task(stop)
+    return {"stopping": True}
 
 
 @app.middleware("http")
