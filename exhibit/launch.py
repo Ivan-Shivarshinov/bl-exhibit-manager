@@ -72,6 +72,9 @@ def launch(port,no_browser=False):
     if not info:
         # Do not start a second server against an occupied/non-app port.
         with socket.socket() as probe:
+            # Match asyncio's POSIX listener: a recently stopped server can leave
+            # connections in TIME_WAIT while the listening port is already free.
+            if os.name != "nt":probe.setsockopt(socket.SOL_SOCKET,socket.SO_REUSEADDR,1)
             try:probe.bind(("127.0.0.1",port))
             except OSError as exc:raise ValueError(f"Порт {port} занят. Закройте прежний сервер или выберите --port.") from exc
         from .project import ROOT
