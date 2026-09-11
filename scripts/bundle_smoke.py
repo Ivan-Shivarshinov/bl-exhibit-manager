@@ -11,6 +11,7 @@ import sys
 import tempfile
 import time
 from urllib.request import Request,urlopen
+from urllib.error import HTTPError
 from zipfile import ZipFile
 
 
@@ -38,8 +39,12 @@ def main():
         def request(path,body=None,raw=None):
             payload=json.dumps(body).encode() if body is not None else raw
             req=Request(base+path,data=payload,headers={'X-Exhibit-Local':'1','Content-Type':'application/json'})
-            with urlopen(req,timeout=30) as r:
-                content=r.read();return json.loads(content) if 'json' in r.headers.get('Content-Type','') else content
+            try:
+                with urlopen(req,timeout=30) as r:
+                    content=r.read();return json.loads(content) if 'json' in r.headers.get('Content-Type','') else content
+            except HTTPError as exc:
+                log=data/'application.log'
+                raise AssertionError(f'{path}: HTTP {exc.code}: '+exc.read().decode(errors='replace')+'\n'+(log.read_text('utf-8',errors='replace')[-16000:] if log.exists() else 'No server log')) from exc
         try:
             command('--no-browser')
             health=request('/api/health');assert health['version']=='0.1.0'
