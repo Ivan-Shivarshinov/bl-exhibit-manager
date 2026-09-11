@@ -53,7 +53,9 @@ def main():
         '--paths',str(ROOT),'--add-data',f'{ROOT / "web/dist"}{os.pathsep}web/dist',
         '--add-data',f'{ROOT / "exhibit/assets"}{os.pathsep}exhibit/assets',
         '--add-data',f'{ROOT / "exhibit/word_pdf.ps1"}{os.pathsep}exhibit',
-        '--collect-all','pypdfium2','--collect-all','pypdfium2_raw','--collect-data','docx','--collect-data','certifi']
+        # docx.parts opens "parts/../templates/..." without normalizing it. POSIX
+        # needs a real parts directory, so include package sources as well as data.
+        '--collect-all','pypdfium2','--collect-all','pypdfium2_raw','--collect-all','docx','--collect-data','certifi']
     if system=='macos':args+=['--osx-bundle-identifier','org.bl-exhibit-manager.desktop']
     subprocess.run([*args,str(ROOT/'scripts/desktop_entry.py')],check=True)
     stage=build/f'BLExhibitManager-{__version__}-{target}'
