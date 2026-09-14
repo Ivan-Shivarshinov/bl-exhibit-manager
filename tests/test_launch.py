@@ -18,7 +18,7 @@ class LaunchTests(TestCase):
     def test_existing_instance_does_not_spawn_or_replace_data(self):
         with tempfile.TemporaryDirectory() as folder:
             root=Path(folder);(root/'web/dist').mkdir(parents=True);(root/'web/dist/index.html').write_text('UI')
-            with patch.object(launch,'WORKSPACE',root),patch.object(launch,'health',return_value={'version':'0.1.0'}),patch.object(launch.subprocess,'Popen') as spawn:
+            with patch.object(launch,'WORKSPACE',root),patch.object(launch,'health',return_value={'version':launch.__version__}),patch.object(launch.subprocess,'Popen') as spawn:
                 self.assertEqual(launch.launch(8765,True),'http://127.0.0.1:8765');spawn.assert_not_called()
             with patch.object(launch,'WORKSPACE',root),patch.object(launch,'health',return_value={'version':'older'}),self.assertRaisesRegex(ValueError,'другая версия'):
                 launch.launch(8765,True)

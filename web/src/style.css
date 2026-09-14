@@ -23,3 +23,8 @@
 @media(max-width:750px){.translation-dialog{padding:16px}.translation-setup,.translation-columns{grid-template-columns:1fr}.translation-editor-toolbar{align-items:flex-start;flex-direction:column}.translation-columns textarea{min-height:350px}.translation-heading h1{font-size:20px}.translation-progress span{display:block;margin:6px 0}.translation-message{bottom:-16px}}
 
 .source-furniture,.source-notes{position:absolute;left:0;right:0;pointer-events:none;background:#f2d95b44;border-block:1px dashed #a78713}.source-notes{background:#f6a34e55;border-color:#b76016}
+.scope-modal {background:white;border-radius:12px;padding:24px;width:min(860px,94vw);max-height:90vh;overflow:auto;box-shadow:0 20px 60px #17253644;}
+.scope-text {white-space:pre-wrap;user-select:text;line-height:1.8;padding:18px;border:1px solid #ccd5df;border-radius:6px;font-family:Georgia,serif;}
+.scope-text mark {background:#ffe9a3;color:inherit;}
+.links-table td:nth-child(2) {max-width:480px;overflow-wrap:anywhere;}
+.links-table td:nth-child(2) button {display:block;margin-top:8px;font-size:12px;}

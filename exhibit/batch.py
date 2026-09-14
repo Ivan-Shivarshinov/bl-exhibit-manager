@@ -5,13 +5,14 @@ import re
 from reportlab.pdfgen import canvas
 
 from . import pdf
-from .project import (DEFAULT_STYLE, DEFAULT_LABELS, check_format, digest, effective_format,
+from .identifiers import stamp_label
+from .project import (DEFAULT_STYLE, DEFAULT_LABELS, NEW_LAYOUT, LEGACY_LAYOUT, check_format, digest, effective_format,
                       group_key, identifier, overrides, revision, safe_path)
 
 
 def snapshot(p, d):
     values, sources = effective_format(p, d)
-    return {"identifier": identifier(d), "folder": d["folder"], "filename": d["filename"],
+    return {"identifier": identifier(d,p), "folder": d["folder"], "filename": d["filename"],
             "path": safe_path(d["folder"], d["filename"]), "format": values, "sources": sources,
             "filename_mode": d.get("filename_mode", "manual")}
 
@@ -36,15 +37,15 @@ def plan(store, original, request):
         if numbering is not None:
             if not isinstance(numbering, dict): raise ValueError("Некорректная нумерация.")
             prefix, n = numbering.get("prefix"), numbering.get("start")
-            if not isinstance(prefix, str) or not re.fullmatch(r"[A-Za-z][A-Za-z0-9]*(?:-[A-Za-z0-9]+)*", prefix):
+            if not isinstance(prefix, str) or (prefix and not re.fullmatch(r"[A-Za-z][A-Za-z0-9]*(?:-[A-Za-z0-9]+)*", prefix)):
                 raise ValueError("Укажите префикс, например RLA или AU-LA.")
             if type(n) is not int or n < 1: raise ValueError("Начальный номер должен быть положительным целым числом.")
-            occupied = {identifier(d).casefold() for d in p["documents"] if d["number"] is not None}
+            occupied = {identifier(d,p).casefold() for d in p["documents"] if d["number"] is not None}
             for d in selected:
                 if d["number"] is not None: continue
-                while f"{prefix}-{n}".casefold() in occupied: n += 1
+                while identifier({**d,'prefix':prefix,'number':n},p).casefold() in occupied: n += 1
                 store.update(p, d["id"], {"prefix": prefix, "number": n}, persist=False)
-                occupied.add(f"{prefix}-{n}".casefold())
+                occupied.add(identifier(d,p).casefold())
                 n += 1
             warnings.append("Уже назначенные номера и префиксы сохранены; занятые номера пропущены. Новые номера идут в порядке строк предпросмотра.")
         names = request.get("names", "keep")
@@ -56,9 +57,9 @@ def plan(store, original, request):
                 if d.get("filename_mode", "manual") == "manual":
                     kept.append(d["title"])
                     continue
-                if not identifier(d): continue
+                if not identifier(d,p): continue
                 title = re.sub(r'[<>:"/\\|?*\x00-\x1f]', "-", d["title"]).strip(" .")[:90].rstrip(" .")
-                name = identifier(d) + (" — " + title if names == "identifier_title" and title else "") + ".pdf"
+                name = identifier(d,p) + (" — " + title if names == "identifier_title" and title else "") + ".pdf"
                 store.update(p, d["id"], {"filename": name}, persist=False)
                 d["filename_mode"] = "generated"
             if kept: warnings.append(f"Сохранены имена, заданные вручную или в прежней версии: {len(kept)}.")
@@ -72,9 +73,9 @@ def plan(store, original, request):
         if scope == "project":
             affected = p["documents"]
             if reset:
-                p["style"], p["format"] = deepcopy(DEFAULT_STYLE), deepcopy(DEFAULT_LABELS)
+                p["style"], p["format"] = {**DEFAULT_STYLE,**NEW_LAYOUT}, deepcopy(DEFAULT_LABELS)
             else:
-                p["style"].update({k: v for k, v in values.items() if k in DEFAULT_STYLE})
+                p["style"].update({k: v for k, v in values.items() if k in set(DEFAULT_STYLE)|set(LEGACY_LAYOUT)})
                 p.setdefault("format", {}).update({k: v for k, v in values.items() if k in DEFAULT_LABELS})
         elif scope == "group":
             folder = request.get("group")
@@ -106,6 +107,9 @@ def plan(store, original, request):
     for did in order:
         d, old = by_id[did], original_docs[did]
         before, after = snapshot(original, old), snapshot(p, d)
+        if before['identifier'] != after['identifier']:
+            p['links_reviewed']=False
+            p['scanned']=False
         # Formatting has no effect on a byte-preserved PDF. Keep its existing review
         # only if its identifier and destination are also unchanged.
         if (d["mode"] == "passthrough" and old["approved"] == revision(original, old)
@@ -119,13 +123,14 @@ def plan(store, original, request):
         d = by_id[change["id"]]
         if d["mode"] == "passthrough": continue
         values, _ = effective_format(p, d)
-        right = " ".join(x for x in (values["designation"], identifier(d)) if x)
+        right = stamp_label({**d,'designation':values['designation']})
         try:
             pdf.init_font()
             for source, selection, label in [(d["original"], d["selection"], "original_label"), (d["translation"], d["translation_selection"], "translation_label")]:
                 if source:
                     width = min(source["sizes"][item["page"]-1][0] for item in selection)
                     pdf.stamp(canvas.Canvas(BytesIO()), width, 1000, values[label], right, values)
+                    if values['stamp_mode']=='overlay':pdf.prepare_part(store.source(p,source),selection,values[label],right,values)
         except ValueError as exc:
             conflicts.append({"code": "stamp", "message": f"{d['title']}: {exc}", "document": d["id"]})
     return p, {"token": digest({"project": original, "request": request}), "changes": changes,

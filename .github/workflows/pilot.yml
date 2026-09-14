@@ -34,8 +34,19 @@ jobs:
       - run: npm ci --prefix web
       - run: npm run build --prefix web
       - run: python -m unittest discover -s tests -q
+      - name: Install native LibreOffice on macOS
+        if: runner.os == 'macOS'
+        run: brew install --cask libreoffice
+      - name: Verify real LibreOffice conversion and full citation links
+        if: runner.os == 'macOS'
+        run: python scripts/verify_feedback_office.py --output output/feedback-office
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: runner.os == 'macOS'
+        with:
+          name: office-review-${{ matrix.target }}
+          path: output/feedback-office
       - run: python scripts/build_bundle.py
-      - run: python scripts/bundle_smoke.py release/BLExhibitManager-0.1.0-${{ matrix.target }}.zip
+      - run: python scripts/bundle_smoke.py release/BLExhibitManager-0.1.1-${{ matrix.target }}.zip
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: pilot-${{ matrix.target }}

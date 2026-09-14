@@ -86,7 +86,7 @@ class Workflow(unittest.TestCase):
         self.assertIn("Северный маяк", reader.pages[1].extract_text())
         for page in reader.pages:
             self.assertEqual(page.extract_text().count("Exhibit RLA-31"), 1)
-            self.assertAlmostEqual(float(page.mediabox.height), 841.8898+54, places=2)
+            self.assertAlmostEqual(float(page.mediabox.height), 841.8898, places=2)
         self.assertEqual(out, self.store.prepare(p, d))
 
     def test_fragment_has_no_excluded_text_or_original_content_stream(self):
@@ -123,7 +123,7 @@ class Workflow(unittest.TestCase):
             for *_, para in rows:
                 for run in para.findall(".//w:r", word.NS):
                     props=run.find("w:rPr", word.NS)
-                    props=tuple((c.tag,tuple(c.attrib.items())) for c in props) if props is not None else ()
+                    props=tuple((c.tag,tuple(c.attrib.items())) for c in props if c.tag not in (f'{{{word.W}}}color',f'{{{word.W}}}u')) if props is not None else ()
                     values.extend((c, props) for c in word.text_of(run))
             return values
         self.assertEqual(styles(self.files["Main document.docx"]), styles(two))

@@ -49,6 +49,11 @@ class MainPdf(unittest.TestCase):
         self.assertTrue(all(x['/D'][0]==0 and ':' not in x['/F']['/UF'] for x in remote))
         self.assertIn('https://example.org/source',[x.get('/URI') for x in actions])
         self.assertNotIn(b'exhibit.invalid',data)
+        for item in page['/Annots']:
+            annotation=item.get_object()
+            if annotation['/A']['/S']=='/GoToR':
+                self.assertEqual(list(annotation['/Border']),[0,0,0])
+                self.assertNotIn('/C',annotation);self.assertNotIn('/BS',annotation)
         self.assertIn('Converted document',page.extract_text())
 
     def test_missing_even_one_repeated_link_blocks_pdf_and_zip(self):
