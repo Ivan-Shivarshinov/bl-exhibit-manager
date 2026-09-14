@@ -1,5 +1,6 @@
 """Surgical edits of footnotes.xml. All other package members remain byte-identical."""
 from copy import deepcopy
+from . import citations
 from io import BytesIO
 from zipfile import ZipFile, ZIP_DEFLATED, BadZipFile
 import re
@@ -13,6 +14,11 @@ NS = {"w": W, "r": R}
 FOOT = "word/footnotes.xml"
 RELS = "word/_rels/footnotes.xml.rels"
 IDENT = re.compile(r"(?<![\w-])[A-Z][A-Z0-9]*(?:-[A-Z][A-Z0-9]*)*-\d+(?![\w-])", re.I)
+UNPREFIXED = re.compile(r"(?<![\w-])(?:Annex|Exhibit)\s+\d+(?![\w-])", re.I)
+
+
+def match_key(value):
+    return ' '.join(value.split()).casefold()
 
 
 def xml(data):
@@ -78,28 +84,50 @@ def scan(data, documents, saved=None):
     for fid, ordinal, pi, p in paras:
         text = text_of(p)
         footnotes.append({"footnote": ordinal, "fid": fid, "paragraph": pi, "text": text})
-        spans = {(m.start(), m.end()) for m in IDENT.finditer(text)}
+        spans = {(m.start(), m.end()) for pattern in (IDENT,UNPREFIXED) for m in pattern.finditer(text)}
         for d in documents:
             for name in [d.get("identifier", ""), d["title"], *d.get("aliases", [])]:
-                if name.strip():
+                if name.strip() and not name.strip().isdigit():
                     boundary = r"[\w-]" if IDENT.fullmatch(name) else r"\w"
-                    spans.update((m.start(), m.end()) for m in re.finditer(r"(?<!"+boundary+")"+re.escape(name)+r"(?!"+boundary+")", text, re.I))
+                    pattern=r'\s+'.join(re.escape(part) for part in name.split())
+                    spans.update((m.start(), m.end()) for m in re.finditer(r"(?<!"+boundary+")"+pattern+r"(?!"+boundary+")", text, re.I))
         # Prefer the longer mention when a title contains its identifier.
-        chosen = []
+        chosen = [(r['start'],r['end']) for r in saved.values() if r.get('custom') and r['fid']==fid and r['paragraph']==pi and text[r['start']:r['end']]==r['mention']]
         for a, b in sorted(spans, key=lambda s: (-(s[1]-s[0]), s[0])):
             if not any(a < y and b > x for x, y in chosen):
                 chosen.append((a, b))
+        paragraph_refs=[]
         for a, b in sorted(chosen):
             mention = text[a:b]
-            candidates = [d["id"] for d in documents if mention.casefold() in
-                          [str(d.get("identifier", "")).casefold(), d["title"].casefold(),
-                           *[x.casefold() for x in d.get("aliases", [])]]]
+            candidates = [d["id"] for d in documents if match_key(mention) in
+                          [match_key(str(d.get("identifier", ""))), match_key(d["title"]),
+                           *[match_key(x) for x in d.get("aliases", [])]]]
             key = f"{fid}:{pi}:{a}:{b}"
             prev = saved.get(key)
             target = prev.get("target") if prev and prev.get("mention") == mention else (candidates[0] if len(candidates) == 1 else None)
-            result.append({"key": key, "fid": fid, "footnote": ordinal, "paragraph": pi, "start": a, "end": b,
+            paragraph_refs.append({"key": key, "fid": fid, "footnote": ordinal, "paragraph": pi, "start": a, "end": b,
                            "mention": mention, "target": target, "candidates": candidates,
-                           "manual": bool(prev and prev.get("manual"))})
+                           "manual": bool(prev and prev.get("manual")), **({'custom':True} if prev and prev.get('custom') else {})})
+        # Identifier followed by this same document's known title is one citation.
+        # Keep the identifier anchor stable for saved choices and range edits.
+        consolidated=[]
+        by_id={d['id']:d for d in documents}
+        for ref in paragraph_refs:
+            prior=consolidated[-1] if consolidated else None
+            if prior and prior['target'] and prior['target']==ref['target'] and not ref.get('custom') and not saved.get(ref['key'],{}).get('scope_manual'):
+                doc=by_id.get(prior['target'],{})
+                between=text[prior['end']:ref['start']]
+                if match_key(prior['mention'])==match_key(doc.get('identifier','')) and match_key(ref['mention'])!=match_key(doc.get('identifier','')) and re.match(r'\s*,',between) and ';' not in between and not citations.LOCATOR.search(between):
+                    continue
+            consolidated.append(ref)
+        paragraph_refs=consolidated
+        citations.propose(text,paragraph_refs)
+        for ref in paragraph_refs:
+            prev=saved.get(ref['key'])
+            if prev and prev.get('scope_manual') and prev['mention']==ref['mention']:
+                ref.update({k:prev[k] for k in ('link_start','link_end','link_text','scope_manual')})
+                ref['scope_review']=False
+        result.extend(paragraph_refs)
     return {"references": result, "footnotes": footnotes}
 
 
@@ -112,6 +140,19 @@ def run_piece(run, start, end):
     t.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
     t.text = text_of(run)[start:end]
     return clone
+
+
+def neutral_link_style(run):
+    """Make managed links uniformly black, bold and upright; retain font and size."""
+    props=run.find('w:rPr',NS)
+    if props is None:
+        props=E.Element(f'{{{W}}}rPr');run.insert(0,props)
+    order='rStyle rFonts b bCs i iCs caps smallCaps strike dstrike outline shadow emboss imprint noProof snapToGrid vanish webHidden color spacing w kern position sz szCs highlight u effect bdr shd fitText vertAlign rtl cs em lang eastAsianLayout specVanish oMath rPrChange'.split()
+    for name,value in (('b','1'),('bCs','1'),('i','0'),('iCs','0'),('color','000000'),('u','none')):
+        for old in props.findall('w:'+name,NS):props.remove(old)
+        element=E.Element(f'{{{W}}}{name}',{f'{{{W}}}val':value})
+        index=next((i for i,child in enumerate(props) if E.QName(child).localname in order and order.index(E.QName(child).localname)>order.index(name)),len(props))
+        props.insert(index,element)
 
 
 def wrap(p, start, end, rid):
@@ -183,6 +224,7 @@ def wrap(p, start, end, rid):
     link = E.Element(f"{{{W}}}hyperlink", {f"{{{R}}}id": rid})
     p.insert(first, link)
     for child in middle:
+        if child.tag==f'{{{W}}}r':neutral_link_style(child)
         link.append(child)
 
 
@@ -196,7 +238,8 @@ def add_links(data, references, paths):
     ids = {x.get("Id") for x in rels}
     for fid, _, pi, p in rows:
         refs = [r for r in references if r["fid"] == fid and r["paragraph"] == pi]
-        for ref in sorted(refs, key=lambda r: r["start"], reverse=True):
+        citations.validate(text_of(p),refs)
+        for ref in sorted(refs, key=lambda r: citations.bounds(r)[0], reverse=True):
             if text_of(p)[ref["start"]:ref["end"]] != ref["mention"]:
                 raise ValueError("Текст сноски изменился. Повторите сопоставление.")
             target = quote(paths[ref["target"]], safe="/")
@@ -209,7 +252,7 @@ def add_links(data, references, paths):
                 ids.add(rid)
                 E.SubElement(rels, f"{{{REL}}}Relationship", Id=rid, Type=R+"/hyperlink", Target=target, TargetMode="External")
                 existing[target] = rid
-            wrap(p, ref["start"], ref["end"], rid)
+            wrap(p, *citations.bounds(ref), rid)
     parts[FOOT] = E.tostring(root, xml_declaration=True, encoding="UTF-8", standalone=True)
     parts[RELS] = E.tostring(rels, xml_declaration=True, encoding="UTF-8", standalone=True)
     out = BytesIO()

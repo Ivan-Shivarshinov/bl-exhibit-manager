@@ -10,13 +10,16 @@ import os
 import re
 import unicodedata
 
-from . import pdf, word, main_pdf
+from . import pdf, word, main_pdf, citations
+from .identifiers import identifier as document_identifier
 
 LOCK = RLock()
 ROOT = Path(os.environ.get("EXHIBIT_DATA_DIR", Path.home() / ".bl-exhibit-manager"))
 DEFAULT_STYLE = {"font": "DejaVu", "size": 10, "margin": 24}
+LEGACY_LAYOUT = {'stamp_mode':'band','top':26}
+NEW_LAYOUT = {'stamp_mode':'overlay','top':26}
 DEFAULT_LABELS = {"designation": "Exhibit", "original_label": "[Original]", "translation_label": "[Translation]"}
-FORMAT_KEYS = set(DEFAULT_STYLE) | set(DEFAULT_LABELS)
+FORMAT_KEYS = set(DEFAULT_STYLE) | set(DEFAULT_LABELS) | set(LEGACY_LAYOUT)
 EDITABLE = {"title", "prefix", "number", "designation", "filename", "folder", "language", "mode",
             "original_label", "translation_label", "selection", "translation_selection", "aliases", "style", "format_overrides", "filename_mode"}
 
@@ -25,8 +28,9 @@ def digest(value):
     return sha256(json.dumps(value, ensure_ascii=False, sort_keys=True).encode()).hexdigest()
 
 
-def identifier(doc):
-    return f"{doc['prefix']}-{doc['number']}" if doc.get("number") is not None else ""
+def identifier(doc, p=None):
+    designation = effective_format(p,doc)[0]['designation'] if p is not None else doc.get('effective_format',doc).get('designation','')
+    return document_identifier({**doc,'designation':designation})
 
 
 def review_digest(doc, style):
@@ -43,7 +47,7 @@ def overrides(doc):
 
 
 def effective_format(p, doc):
-    values = {**DEFAULT_LABELS, **p.get("format", {}), **p["style"]}
+    values = {**LEGACY_LAYOUT, **DEFAULT_LABELS, **p.get("format", {}), **p["style"]}
     sources = {k: "project" for k in FORMAT_KEYS}
     for name, layer in [("group", p.get("group_styles", {}).get(group_key(doc["folder"]), {})), ("document", overrides(doc))]:
         values.update(layer)
@@ -53,7 +57,11 @@ def effective_format(p, doc):
 
 def effective_document(p, doc):
     values, _ = effective_format(p, doc)
-    return {**doc, **{k: values[k] for k in DEFAULT_LABELS}}, {k: values[k] for k in DEFAULT_STYLE}
+    # Missing layout fields mean the original band layout. Keep the old digest
+    # byte-for-byte until the user explicitly changes these settings.
+    explicit=set(p['style']) | set(p.get('group_styles',{}).get(group_key(doc['folder']),{})) | set(overrides(doc))
+    style={k:values[k] for k in (set(DEFAULT_STYLE) | (set(LEGACY_LAYOUT)&explicit))}
+    return {**doc, **{k: values[k] for k in DEFAULT_LABELS}}, style
 
 
 def revision(p, doc):
@@ -112,7 +120,7 @@ class Store:
         if not isinstance(name, str) or not name.strip() or len(name) > 120:
             raise ValueError("Введите название подачи (до 120 символов).")
         p = {"schema": 1, "id": uuid4().hex, "name": name.strip(), "documents": [], "main": None,
-             "style": deepcopy(DEFAULT_STYLE), "references": [], "footnotes": [], "links_reviewed": False}
+             "style": {**DEFAULT_STYLE,**NEW_LAYOUT}, "references": [], "footnotes": [], "links_reviewed": False}
         self.save(p)
         return p
 
@@ -184,13 +192,14 @@ class Store:
         if not changes.keys() <= EDITABLE:
             raise ValueError("Неизвестные настройки документа.")
         doc = self.document(p, did)
+        before_identifier = identifier(doc,p)
         before = {k: doc.get(k) for k in ("prefix", "number", "filename", "folder", "title", "aliases")}
         draft = {**doc, **changes}
         if draft["mode"] not in ("prepare", "passthrough") or draft["designation"] not in ("Exhibit", "Annex", ""):
             raise ValueError("Некорректный режим или обозначение.")
         if draft["number"] is not None and (type(draft["number"]) is not int or draft["number"] < 1):
             raise ValueError("Номер должен быть положительным целым числом.")
-        if draft["number"] is not None and not re.fullmatch(r"[A-Za-z][A-Za-z0-9]*(?:-[A-Za-z0-9]+)*", draft["prefix"]):
+        if not isinstance(draft['prefix'],str) or (draft["prefix"] and not re.fullmatch(r"[A-Za-z][A-Za-z0-9]*(?:-[A-Za-z0-9]+)*", draft["prefix"])):
             raise ValueError("Префикс: латинские буквы, цифры и дефисы, например AU-LA.")
         for key in ("title", "language", "original_label", "translation_label", "prefix", "folder", "filename"):
             if not isinstance(draft[key], str) or len(draft[key]) > 250:
@@ -212,13 +221,13 @@ class Store:
         layer = deepcopy(changes.get("format_overrides", overrides(doc)))
         layer.update({k: v for k, v in changes.items() if k in DEFAULT_LABELS})
         if "style" in changes:
-            for key in DEFAULT_STYLE: layer.pop(key, None)
+            for key in set(DEFAULT_STYLE) | set(LEGACY_LAYOUT): layer.pop(key, None)
             layer.update(changes["style"] or {})
         doc.update(changes)
         doc["format_overrides"] = layer
         if "filename" in changes:
             doc["filename_mode"] = changes.get("filename_mode", "manual")
-        if before != {k: doc.get(k) for k in before}:
+        if before != {k: doc.get(k) for k in before} or before_identifier != identifier(doc,p):
             p["links_reviewed"] = False
             p["scanned"] = False
         if persist: self.save(p)
@@ -262,8 +271,8 @@ class Store:
     def scan(self, p):
         if not p["main"]:
             raise ValueError("Сначала загрузите основной DOCX.")
-        saved = {r["key"]: r for r in p["references"] if r.get("manual")}
-        documents = [{**d, "identifier": identifier(d)} for d in p["documents"]]
+        saved = {r["key"]: r for r in p["references"] if r.get("manual") or r.get('scope_manual')}
+        documents = [{**d, "identifier": identifier(d,p)} for d in p["documents"]]
         found = word.scan(self.source(p, p["main"]), documents, saved)
         # Preserve explicit user-added free-text spans while the source is unchanged.
         keys = {r["key"] for r in found["references"]}
@@ -296,7 +305,7 @@ class Store:
             raise ValueError("Текст не найден в этой сноске.")
         added = 0
         for m in matches:
-            if any(r["fid"] == fid and r["paragraph"] == pi and r["start"] < m.end() and r["end"] > m.start() for r in p["references"]):
+            if any(r["fid"] == fid and r["paragraph"] == pi and citations.bounds(r)[0] < m.end() and citations.bounds(r)[1] > m.start() for r in p["references"]):
                 continue
             p["references"].append({"key": f"{fid}:{pi}:{m.start()}:{m.end()}", "fid": fid,
                 "footnote": para["footnote"], "paragraph": pi, "start": m.start(), "end": m.end(),
@@ -306,6 +315,17 @@ class Store:
             raise ValueError("Упоминание уже сопоставляется или пересекается с другим.")
         p["links_reviewed"] = False
         self.save(p)
+        return p
+
+    def reference_range(self,p,key,start,end):
+        ref=next((r for r in p['references'] if r['key']==key),None)
+        if ref is None:raise ValueError('Ссылка не найдена. Повторите сопоставление.')
+        para=next(f for f in p['footnotes'] if f['fid']==ref['fid'] and f['paragraph']==ref['paragraph'])
+        if type(start) is not int or type(end) is not int:raise ValueError('Выделите текст ссылки в сноске.')
+        changed={**ref,'link_start':start,'link_end':end,'link_text':para['text'][start:end],'scope_manual':True,'scope_review':False}
+        peers=[changed if r['key']==key else r for r in p['references'] if r['fid']==ref['fid'] and r['paragraph']==ref['paragraph']]
+        citations.validate(para['text'],peers)
+        ref.update(changed);p['links_reviewed']=False;self.save(p)
         return p
 
     def confirm_links(self, p):
@@ -325,7 +345,7 @@ class Store:
         if not p["documents"]:
             issue("empty", "Добавьте хотя бы один PDF.")
         for d in p["documents"]:
-            ident = identifier(d)
+            ident = identifier(d,p)
             if d["mode"] == "prepare" and effective_format(p, d)[0]["designation"] and d["number"] is None:
                 issue("number", "Задайте номер приложения или выберите обозначение «Без слова».", d["id"])
             if ident and ident.casefold() in ids:
@@ -372,7 +392,7 @@ class Store:
     def main_pdf_key(self, p):
         data, paths = self.linked_main(p)
         # ZIP entry timestamps are irrelevant to the rendered document.
-        key = digest({"parts": {k: sha256(v).hexdigest() for k, v in word.package(data).items()}, "paths": paths, "version": 1})
+        key = digest({"parts": {k: sha256(v).hexdigest() for k, v in word.package(data).items()}, "paths": paths, "version": 2})
         return key, data, paths
 
     def main_pdf_status(self, p):
@@ -429,12 +449,12 @@ class Store:
     def public(self, p):
         result = deepcopy(p)
         for d in result["documents"]:
-            d["identifier"] = identifier(d)
+            d["identifier"] = identifier(d,p)
             d["ready"] = d["approved"] == revision(p, d)
             d["effective_format"], d["format_sources"] = effective_format(p, d)
             d["format_overrides"] = overrides(d)
             d["filename_mode"] = d.get("filename_mode", "manual")
-        result["format_defaults"] = {**DEFAULT_LABELS, **p.get("format", {}), **p["style"]}
+        result["format_defaults"] = {**LEGACY_LAYOUT, **DEFAULT_LABELS, **p.get("format", {}), **p["style"]}
         result["group_formats"] = {d["folder"]: {**result["format_defaults"], **p.get("group_styles", {}).get(group_key(d["folder"]), {})} for d in p["documents"]}
         result["issues"] = self.validate(p)
         return result
@@ -454,17 +474,19 @@ class Store:
 
 
 def check_style(style):
-    if not isinstance(style, dict) or set(style) != {"font", "size", "margin"}:
+    if not isinstance(style, dict) or not set(DEFAULT_STYLE) <= set(style) or not set(style) <= set(DEFAULT_STYLE)|set(LEGACY_LAYOUT):
         raise ValueError("Ожидаются шрифт, размер и отступ штампа.")
     if style["font"] not in ("DejaVu", "Helvetica", "Times-Roman") or not 6 <= float(style["size"]) <= 24 or not 8 <= float(style["margin"]) <= 100:
         raise ValueError("Некорректные настройки штампа.")
+    if style.get('stamp_mode','band') not in ('band','overlay') or not 8 <= float(style.get('top',26)) <= 150:
+        raise ValueError('Режим штампа: в полях страницы или отдельная полоса; отступ сверху — 8–150 pt.')
 
 
 def check_format(values):
     if not isinstance(values, dict) or not values.keys() <= FORMAT_KEYS:
         raise ValueError("Некорректные параметры оформления.")
     try:
-        check_style({**DEFAULT_STYLE, **{k: v for k, v in values.items() if k in DEFAULT_STYLE}})
+        check_style({**DEFAULT_STYLE, **{k: v for k, v in values.items() if k in set(DEFAULT_STYLE)|set(LEGACY_LAYOUT)}})
     except (TypeError, ValueError):
         raise ValueError("Некорректные параметры шрифта или отступа.") from None
     if values.get("designation", "Exhibit") not in ("Exhibit", "Annex", ""):

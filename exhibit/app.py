@@ -156,6 +156,12 @@ def confirm_links(pid: str):
         return store.public(store.confirm_links(store.load(pid)))
 
 
+@app.post("/api/projects/{pid}/references/range")
+async def reference_range(pid: str,request: Request):
+    b=await request.json()
+    with LOCK:return store.public(store.reference_range(store.load(pid),b['key'],b.get('start'),b.get('end')))
+
+
 @app.get("/api/projects/{pid}/documents/{did}/preview")
 def preview(pid: str, did: str, part: str = "original", page: int = 1):
     with LOCK:

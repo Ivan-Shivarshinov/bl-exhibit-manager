@@ -86,6 +86,9 @@ def portable_links(data, markers):
                     NameObject("/D"): ArrayObject([NumberObject(0), NameObject("/Fit")]),
                     NameObject("/NewWindow"): BooleanObject(True),
                 })
+                for key in ('/C','/BS','/AP'):annotation.pop(key,None)
+                annotation[NameObject('/Border')]=ArrayObject([NumberObject(0)]*3)
+                annotation[NameObject('/H')]=NameObject('/N')
                 seen[uri] += 1
         missing = set(markers) - seen.keys()
         if missing: raise ValueError(f"При конвертации потеряны ссылки на приложения: {len(missing)}. PDF и ZIP не выданы. Проверьте сноски в исходном Word.")
