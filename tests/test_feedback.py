@@ -19,13 +19,13 @@ def citation_docx(texts):
     body=word.xml(parts['word/document.xml'])
     for ref in body.findall('.//w:footnoteReference',word.NS):
         if int(ref.get(f'{{{word.W}}}id'))>len(texts):ref.getparent().remove(ref)
-    parts['word/document.xml']=E.tostring(body)
+    parts['word/document.xml']=E.tostring(body,xml_declaration=True,encoding='UTF-8',standalone=True)
     for i,text in enumerate(texts,1):
         note=root.find(f"w:footnote[@w:id='{i}']",word.NS);note[:]=[]
         p=E.SubElement(note,'{'+word.W+'}p');r=E.SubElement(p,'{'+word.W+'}r');E.SubElement(r,'{'+word.W+'}t').text=text
     for note in list(root):
         if int(note.get('{'+word.W+'}id'))>len(texts):root.remove(note)
-    parts[word.FOOT]=E.tostring(root);out=BytesIO()
+    parts[word.FOOT]=E.tostring(root,xml_declaration=True,encoding='UTF-8',standalone=True);out=BytesIO()
     with ZipFile(out,'w',ZIP_DEFLATED) as z:
         for name,data in parts.items():z.writestr(name,data)
     return out.getvalue()

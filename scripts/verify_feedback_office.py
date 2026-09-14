@@ -57,7 +57,8 @@ def fixture():
     E.SubElement(r,f'{{{word.W}}}t').text='example.org'
     rels=word.xml(parts[word.RELS]) if word.RELS in parts else E.Element(f'{{{word.REL}}}Relationships')
     E.SubElement(rels,f'{{{word.REL}}}Relationship',Id='rIdWebsite',Type=word.R+'/hyperlink',Target='https://example.org/',TargetMode='External')
-    parts[word.FOOT]=E.tostring(root);parts[word.RELS]=E.tostring(rels)
+    parts[word.FOOT]=E.tostring(root,xml_declaration=True,encoding='UTF-8',standalone=True)
+    parts[word.RELS]=E.tostring(rels,xml_declaration=True,encoding='UTF-8',standalone=True)
     out=BytesIO()
     with ZipFile(out,'w',ZIP_DEFLATED) as z:
         for name,data in parts.items():z.writestr(name,data)
@@ -105,7 +106,8 @@ def verify(output,engine=None):
                     simple=BytesIO();d=Document();d.add_paragraph('Fictional smoke check');d.save(simple)
                     linked,paths=store.linked_main(project)
                     marked,_=main_pdf.marked_docx(linked,list(paths.values()))
-                    for name,data in [('simple',simple.getvalue()),('original',fixture()),('linked',linked),('marked',marked)]:
+                    from exhibit.samples import main_docx
+                    for name,data in [('simple',simple.getvalue()),('base',main_docx()),('original',fixture()),('linked',linked),('marked',marked)]:
                         source=output/(name+'.docx');source.write_bytes(data)
                         profile=output/(name+'-profile')
                         result=subprocess.run([direct,'-env:UserInstallation='+profile.as_uri(),'--headless','--convert-to','pdf:writer_pdf_Export','--outdir',str(output),str(source)],capture_output=True,timeout=45)
