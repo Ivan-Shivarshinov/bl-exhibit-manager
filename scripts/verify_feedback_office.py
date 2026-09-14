@@ -55,7 +55,7 @@ def fixture():
     E.SubElement(props,f'{{{word.W}}}color',{f'{{{word.W}}}val':'0000FF'})
     E.SubElement(props,f'{{{word.W}}}u',{f'{{{word.W}}}val':'single'})
     E.SubElement(r,f'{{{word.W}}}t').text='example.org'
-    rels=word.xml(parts[word.RELS]) if word.RELS in parts else E.Element(f'{{{word.REL}}}Relationships')
+    rels=word.xml(parts[word.RELS]) if word.RELS in parts else E.Element(f'{{{word.REL}}}Relationships',nsmap={None:word.REL})
     E.SubElement(rels,f'{{{word.REL}}}Relationship',Id='rIdWebsite',Type=word.R+'/hyperlink',Target='https://example.org/',TargetMode='External')
     parts[word.FOOT]=E.tostring(root,xml_declaration=True,encoding='UTF-8',standalone=True)
     parts[word.RELS]=E.tostring(rels,xml_declaration=True,encoding='UTF-8',standalone=True)
@@ -107,7 +107,7 @@ def verify(output,engine=None):
                     linked,paths=store.linked_main(project)
                     marked,_=main_pdf.marked_docx(linked,list(paths.values()))
                     from exhibit.samples import main_docx
-                    for name,data in [('simple',simple.getvalue()),('base',main_docx()),('original',fixture()),('linked',linked),('marked',marked)]:
+                    for name,data in [('simple',simple.getvalue()),('base',main_docx()),('citations',citation_docx(TEXTS)),('original',fixture()),('linked',linked),('marked',marked)]:
                         source=output/(name+'.docx');source.write_bytes(data)
                         profile=output/(name+'-profile')
                         result=subprocess.run([direct,'-env:UserInstallation='+profile.as_uri(),'--headless','--convert-to','pdf:writer_pdf_Export','--outdir',str(output),str(source)],capture_output=True,timeout=45)

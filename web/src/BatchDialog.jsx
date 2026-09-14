@@ -3,6 +3,7 @@ import React, {useState} from 'react';
 const TITLES = {font:'Шрифт',size:'Размер, pt',margin:'Отступ по горизонтали, pt',top:'Отступ сверху, pt',stamp_mode:'Размещение штампов',designation:'Обозначение',original_label:'Пометка оригинала',translation_label:'Пометка перевода'};
 const SOURCE = {project:'Подача',group:'Группа',document:'Документ'};
 const keys = Object.keys(TITLES);
+const displayValue=(key,value)=>key==='stamp_mode'?({overlay:'В полях исходной страницы',band:'Дополнительная полоса над страницей'}[value]):String(value)||'Без слова';
 
 export default function BatchDialog({p, ids, initialAction, busy, error, onClose, onPreview, onApply}) {
   const docs = ids.map(id=>p.documents.find(d=>d.id===id));
@@ -43,7 +44,7 @@ export default function BatchDialog({p, ids, initialAction, busy, error, onClose
     </>}
     <div className="actions"><button className="primary" disabled={Boolean(busy||!canPreview)} onClick={async()=>{setReport(null);const next=await onPreview(request);if(next)setReport(next);}}>Проверить изменения</button><span aria-live="polite">{busy||''}</span></div>
     {report?<section className="batch-report"><h3>Предварительная проверка · изменится документов: {report.changes.length}</h3>{report.warnings.map((w,i)=><p className="muted" key={i}>{w}</p>)}{report.links_need_review?<p className="pending">После применения потребуется заново сопоставить и проверить ссылки Word.</p>:null}{report.conflicts.map((c,i)=><p role="alert" className="preview-error" key={i}>{c.message}</p>)}
-      <div className="batch-table"><table><thead><tr><th>Документ</th><th>Было</th><th>Станет</th></tr></thead><tbody>{report.changes.map(c=><tr key={c.id}><td>{c.title}{c.requires_review?<small>Результат потребует проверки</small>:null}</td>{['before','after'].map(side=><td key={side}><b>{c[side].identifier||'Без номера'}</b><div>{c[side].path}</div>{keys.filter(k=>c.before.format[k]!==c.after.format[k]||c.before.sources[k]!==c.after.sources[k]).map(k=><small key={k}>{TITLES[k]}: {String(c[side].format[k])||'Без слова'} · {SOURCE[c[side].sources[k]]}</small>)}</td>)}</tr>)}</tbody></table></div>
+      <div className="batch-table"><table><thead><tr><th>Документ</th><th>Было</th><th>Станет</th></tr></thead><tbody>{report.changes.map(c=><tr key={c.id}><td>{c.title}{c.requires_review?<small>Результат потребует проверки</small>:null}</td>{['before','after'].map(side=><td key={side}><b>{c[side].identifier||'Без номера'}</b><div>{c[side].path}</div>{keys.filter(k=>c.before.format[k]!==c.after.format[k]||c.before.sources[k]!==c.after.sources[k]).map(k=><small key={k}>{TITLES[k]}: {displayValue(k,c[side].format[k])} · {SOURCE[c[side].sources[k]]}</small>)}</td>)}</tr>)}</tbody></table></div>
       {!report.changes.length?<p className="muted">{report.settings_changed?'Настройки уровня сохранятся. Текущие документы используют параметры с более высоким приоритетом либо уже имеют такие значения.':'Изменений нет.'}</p>:null}
       <button className="primary" disabled={Boolean(busy||report.conflicts.length||!report.settings_changed)} onClick={()=>onApply(request,report.token)}>Применить проверенные изменения</button>
     </section>:null}
