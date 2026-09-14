@@ -48,7 +48,7 @@ def main():
                 raise AssertionError(f'{path}: HTTP {exc.code}: '+exc.read().decode(errors='replace')+'\n'+(log.read_text('utf-8',errors='replace')[-16000:] if log.exists() else 'No server log')) from exc
         try:
             command('--no-browser')
-            health=request('/api/health');assert health['version']=='0.1.1'
+            health=request('/api/health');assert health['version']=='0.1.2'
             html=request('/').decode();assert 'root' in html
             for asset in re.findall(r'(?:src|href)="(/assets/[^\"]+)"',html):assert len(request(asset))>100
             command('--no-browser') # Repeated start keeps the existing process/data.

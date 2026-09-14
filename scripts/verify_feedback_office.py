@@ -3,6 +3,7 @@ import argparse
 import json
 import sys
 import subprocess
+import ctypes
 from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -13,6 +14,8 @@ sys.path.insert(0,str(Path(__file__).resolve().parent.parent))
 from lxml import etree as E
 from PIL import Image
 from pypdf import PdfReader
+import pypdfium2 as pdfium
+import pypdfium2.raw as pdfium_raw
 from exhibit import word, pdf, main_pdf
 from exhibit.project import Store
 from exhibit.samples import make_pdf
@@ -125,10 +128,12 @@ def verify(output,engine=None):
             props=run.find('w:rPr',word.NS)
             assert props.find('w:color',word.NS).attrib=={f'{{{word.W}}}val':'000000'}
             assert props.find('w:u',word.NS).get(f'{{{word.W}}}val')=='none'
+            for name,value in [('b','1'),('bCs','1'),('i','0'),('iCs','0')]:
+                assert props.find('w:'+name,word.NS).get(f'{{{word.W}}}val')==value
     old=word.xml(word.package(fixture())[word.FOOT]).find('.//w:hyperlink',word.NS)
     website=root.xpath('.//w:hyperlink[@r:id="rIdWebsite"]',namespaces=word.NS)[0]
     assert E.tostring(old)==E.tostring(website)
-    data=(output/'Submission/Main document.pdf').read_bytes();reader=PdfReader(BytesIO(data));count=0;targets=set();websites=0
+    data=(output/'Submission/Main document.pdf').read_bytes();reader=PdfReader(BytesIO(data));count=0;targets=set();websites=0;bold_characters=0
     for index,page in enumerate(reader.pages):
         png=pdf.render_png(data,index+1,2);(output/f'Main-page-{index+1}.png').write_bytes(png)
         rendered=Image.open(BytesIO(png)).convert('RGB')
@@ -143,8 +148,24 @@ def verify(output,engine=None):
             x0,y0,x1,y1=map(float,a['/Rect']);h=float(page.mediabox.height)
             pixels=rendered.crop((int(x0*sx),int((h-y1)*sy),int(x1*sx),int((h-y0)*sy)))
             assert not any(max(pixel)-min(pixel)>8 for pixel in pixels.get_flattened_data()),'Coloured managed link'
+        rectangles=[list(map(float,item.get_object()['/Rect'])) for item in page.get('/Annots',[]) if item.get_object().get('/A',{}).get('/S')=='/GoToR']
+        with pdfium.PdfDocument(data) as native:
+            native_page=native[index];textpage=native_page.get_textpage()
+            try:
+                for ci in range(textpage.count_chars()):
+                    if not chr(pdfium_raw.FPDFText_GetUnicode(textpage,ci)).isalnum():continue
+                    x0,y0,x1,y1=textpage.get_charbox(ci);x,y=(x0+x1)/2,(y0+y1)/2
+                    if not any(a<=x<=c and b<=y<=d for a,b,c,d in rectangles):continue
+                    flags=ctypes.c_int();size=pdfium_raw.FPDFText_GetFontInfo(textpage,ci,None,0,ctypes.byref(flags));name=ctypes.create_string_buffer(size)
+                    pdfium_raw.FPDFText_GetFontInfo(textpage,ci,name,size,ctypes.byref(flags))
+                    weight=pdfium_raw.FPDFText_GetFontWeight(textpage,ci)
+                    assert weight>=600 or b'bold' in name.value.lower(),('Link is not bold',name.value,weight)
+                    assert not flags.value&64 and b'italic' not in name.value.lower(),('Link is italic',name.value)
+                    bold_characters+=1
+            finally:textpage.close();native_page.close()
     assert count>=len(EXPECTED) and len(targets)==len(LABELS) and websites==1,(count,targets,websites)
-    result={'engine':actual['label'],'citations':len(managed),'pdf_link_rectangles':count,'pdf_targets':len(targets),'pages':len(reader.pages),'black_links':True,'external_website_preserved':True}
+    assert bold_characters>100
+    result={'engine':actual['label'],'citations':len(managed),'pdf_link_rectangles':count,'pdf_targets':len(targets),'pages':len(reader.pages),'black_links':True,'bold_upright_pdf_characters':bold_characters,'external_website_preserved':True}
     (output/'checks.json').write_text(json.dumps(result,indent=2),encoding='utf-8')
     print(json.dumps(result))
 

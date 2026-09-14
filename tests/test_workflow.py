@@ -123,7 +123,7 @@ class Workflow(unittest.TestCase):
             for *_, para in rows:
                 for run in para.findall(".//w:r", word.NS):
                     props=run.find("w:rPr", word.NS)
-                    props=tuple((c.tag,tuple(c.attrib.items())) for c in props if c.tag not in (f'{{{word.W}}}color',f'{{{word.W}}}u')) if props is not None else ()
+                    props=tuple((c.tag,tuple(c.attrib.items())) for c in props if E.QName(c).localname not in ('color','u','b','bCs','i','iCs')) if props is not None else ()
                     values.extend((c, props) for c in word.text_of(run))
             return values
         self.assertEqual(styles(self.files["Main document.docx"]), styles(two))

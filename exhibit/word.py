@@ -143,12 +143,12 @@ def run_piece(run, start, end):
 
 
 def neutral_link_style(run):
-    """Override link/visited-link decoration, retaining all other run properties."""
+    """Make managed links uniformly black, bold and upright; retain font and size."""
     props=run.find('w:rPr',NS)
     if props is None:
         props=E.Element(f'{{{W}}}rPr');run.insert(0,props)
     order='rStyle rFonts b bCs i iCs caps smallCaps strike dstrike outline shadow emboss imprint noProof snapToGrid vanish webHidden color spacing w kern position sz szCs highlight u effect bdr shd fitText vertAlign rtl cs em lang eastAsianLayout specVanish oMath rPrChange'.split()
-    for name,value in (('color','000000'),('u','none')):
+    for name,value in (('b','1'),('bCs','1'),('i','0'),('iCs','0'),('color','000000'),('u','none')):
         for old in props.findall('w:'+name,NS):props.remove(old)
         element=E.Element(f'{{{W}}}{name}',{f'{{{W}}}val':value})
         index=next((i for i,child in enumerate(props) if E.QName(child).localname in order and order.index(E.QName(child).localname)>order.index(name)),len(props))
