@@ -96,7 +96,21 @@ def verify(output,engine=None):
         with patch.object(main_pdf,'popen',side_effect=logged_popen):
             try:package=store.export(project)
             except Exception:
-                log.flush();print((output/'office.log').read_text('utf-8',errors='replace'));raise
+                log.flush();print((output/'office.log').read_text('utf-8',errors='replace'))
+                if sys.platform=='darwin':
+                    executable=Path(actual['executable'])
+                    if executable.stat().st_size<10000:print('Launcher:',executable.read_text(errors='replace'))
+                    direct='/Applications/LibreOffice.app/Contents/MacOS/soffice'
+                    from docx import Document
+                    simple=BytesIO();d=Document();d.add_paragraph('Fictional smoke check');d.save(simple)
+                    linked,paths=store.linked_main(project)
+                    marked,_=main_pdf.marked_docx(linked,list(paths.values()))
+                    for name,data in [('simple',simple.getvalue()),('original',fixture()),('linked',linked),('marked',marked)]:
+                        source=output/(name+'.docx');source.write_bytes(data)
+                        profile=output/(name+'-profile')
+                        result=subprocess.run([direct,'-env:UserInstallation='+profile.as_uri(),'--headless','--convert-to','pdf:writer_pdf_Export','--outdir',str(output),str(source)],capture_output=True,timeout=45)
+                        print(name,result.returncode,result.stdout.decode(errors='replace'),result.stderr.decode(errors='replace'),(output/(name+'.pdf')).exists())
+                raise
         (output/'Feedback review.zip').write_bytes(package)
         with ZipFile(BytesIO(package)) as z:z.extractall(output)
         (output/'Original Main document.docx').write_bytes(fixture())
