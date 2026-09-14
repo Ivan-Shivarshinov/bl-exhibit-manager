@@ -41,7 +41,7 @@ jobs:
         if: runner.os == 'macOS'
         run: python scripts/verify_feedback_office.py --output output/feedback-office
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        if: runner.os == 'macOS'
+        if: always() && runner.os == 'macOS'
         with:
           name: office-review-${{ matrix.target }}
           path: output/feedback-office

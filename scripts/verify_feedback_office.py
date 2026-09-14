@@ -2,6 +2,7 @@
 import argparse
 import json
 import sys
+import subprocess
 from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -84,9 +85,18 @@ def verify(output,engine=None):
     output.mkdir(parents=True,exist_ok=True)
     actual=engine or main_pdf.available()
     assert actual['available'],actual
-    with TemporaryDirectory() as folder,patch.object(main_pdf,'available',return_value=actual):
+    (output/'Original Main document.docx').write_bytes(fixture())
+    real_popen=main_pdf.popen
+    with (output/'office.log').open('w',encoding='utf-8') as log,TemporaryDirectory() as folder,patch.object(main_pdf,'available',return_value=actual):
         store=Store(folder);project=create_review(store)
-        package=store.export(project)
+        def logged_popen(command,**kwargs):
+            log.write(repr(command)+'\n');log.flush()
+            kwargs.update(stdout=log,stderr=subprocess.STDOUT)
+            return real_popen(command,**kwargs)
+        with patch.object(main_pdf,'popen',side_effect=logged_popen):
+            try:package=store.export(project)
+            except Exception:
+                log.flush();print((output/'office.log').read_text('utf-8',errors='replace'));raise
         (output/'Feedback review.zip').write_bytes(package)
         with ZipFile(BytesIO(package)) as z:z.extractall(output)
         (output/'Original Main document.docx').write_bytes(fixture())
