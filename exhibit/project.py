@@ -21,7 +21,7 @@ NEW_LAYOUT = {'stamp_mode':'overlay','top':26}
 DEFAULT_LABELS = {"designation": "Exhibit", "original_label": "[Original]", "translation_label": "[Translation]"}
 FORMAT_KEYS = set(DEFAULT_STYLE) | set(DEFAULT_LABELS) | set(LEGACY_LAYOUT)
 EDITABLE = {"title", "prefix", "number", "designation", "filename", "folder", "language", "mode",
-            "original_label", "translation_label", "selection", "translation_selection", "aliases", "style", "format_overrides", "filename_mode"}
+            "original_label", "translation_label", "selection", "translation_selection", "aliases", "style", "format_overrides", "filename_mode", "short_title"}
 
 
 def digest(value):
@@ -34,7 +34,7 @@ def identifier(doc, p=None):
 
 
 def review_digest(doc, style):
-    return digest({"doc": {k: v for k, v in doc.items() if k not in ("approved", "identifier", "format_overrides", "filename_mode")}, "style": style})
+    return digest({"doc": {k: v for k, v in doc.items() if k not in ("approved", "identifier", "format_overrides", "filename_mode", "short_title")}, "style": style})
 
 
 def group_key(folder):
@@ -160,10 +160,24 @@ class Store:
     def upload(self, p, name, data, kind="original", did=None):
         source = self.put(p, name, data, "docx" if kind == "main" else "pdf")
         if kind == "main":
+            previous = deepcopy(p)
+            if p.get('main', {}) and p['main']['sha256'] == source['sha256']:
+                p['main'] = source
+                self.save(p)
+                return p
             p["main"] = source
             p["references"], p["footnotes"] = [], []
             p["links_reviewed"] = False
             p["scanned"] = False
+            if previous.get('main'):
+                from .revisions import reconcile
+                documents = [{**d, 'identifier': identifier(d, p)} for d in p['documents']]
+                found = word.scan(data, documents, project_id=p['id'])
+                from .word_bridge import annotate
+                annotate(found, p)
+                p['edition_report'] = reconcile(previous, found)
+                p.update(found)
+                p['scanned'] = True
         elif did:
             doc = self.document(p, did)
             if kind not in ("original", "translation"):
@@ -195,6 +209,8 @@ class Store:
         before_identifier = identifier(doc,p)
         before = {k: doc.get(k) for k in ("prefix", "number", "filename", "folder", "title", "aliases")}
         draft = {**doc, **changes}
+        if not isinstance(draft.get('short_title', ''), str) or len(draft.get('short_title', '')) > 250:
+            raise ValueError('Короткое название: не более 250 символов.')
         if draft["mode"] not in ("prepare", "passthrough") or draft["designation"] not in ("Exhibit", "Annex", ""):
             raise ValueError("Некорректный режим или обозначение.")
         if draft["number"] is not None and (type(draft["number"]) is not int or draft["number"] < 1):
@@ -273,7 +289,9 @@ class Store:
             raise ValueError("Сначала загрузите основной DOCX.")
         saved = {r["key"]: r for r in p["references"] if r.get("manual") or r.get('scope_manual')}
         documents = [{**d, "identifier": identifier(d,p)} for d in p["documents"]]
-        found = word.scan(self.source(p, p["main"]), documents, saved)
+        found = word.scan(self.source(p, p["main"]), documents, saved, project_id=p['id'])
+        from .word_bridge import annotate
+        annotate(found, p)
         # Preserve explicit user-added free-text spans while the source is unchanged.
         keys = {r["key"] for r in found["references"]}
         for r in p["references"]:
@@ -444,7 +462,10 @@ class Store:
             if p["main"]:
                 z.writestr("Submission/Main document.docx", self.linked_main(p)[0])
                 z.writestr("Submission/Main document.pdf", self.prepare_main_pdf(p))
-        return out.getvalue()
+        data = out.getvalue()
+        from .history import save_export
+        save_export(self, p, data)
+        return data
 
     def public(self, p):
         result = deepcopy(p)

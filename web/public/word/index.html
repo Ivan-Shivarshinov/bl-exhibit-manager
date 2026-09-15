@@ -1,0 +1,15 @@
+<!doctype html>
+<html lang="ru"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>BL Exhibit Manager · Word</title><link rel="stylesheet" href="./pane.css"><script src="https://appsforoffice.microsoft.com/lib/1/hosted/office.js"></script><script type="module" src="./pane.js"></script></head>
+<body><header><b>BL Exhibit Manager</b><p>Сноски и приложения</p></header>
+<p id="status" role="status">Подключение к Word…</p><div id="error" role="alert" hidden></div>
+<main id="workspace" hidden>
+<label>Подача<select id="project"><option value="">Выберите подачу</option></select></label><button id="refresh">Обновить список</button>
+<label>Найти приложение<input id="search" type="search" placeholder="Номер или название"></label><div id="documents"></div>
+<section><h2>Вставить ссылку</h2><p id="selected">Выберите приложение выше.</p>
+<label>Название<select id="form"><option value="full">Полное</option><option value="short">Короткое</option></select></label>
+<label>Страница, параграф или статья<input id="pinpoint" maxlength="250" placeholder="Например: paras. 5–6 или Article 421"></label>
+<p class="hint">Указание страницы остаётся за пределами ссылки.</p><div id="citation-preview"></div>
+<button id="insert" disabled>Создать сноску в Word</button><button id="append" disabled>Добавить в существующую сноску</button>
+</section><section><h2>Обновление названий и номеров</h2><button id="check" disabled>Проверить ссылки</button><div id="updates"></div><button id="apply" hidden>Применить выбранные изменения</button></section>
+<section><h2>Передать текущую редакцию</h2><p>Сохраните документ в Word. Кнопка передаст его в выбранную локальную подачу для проверки и сборки DOCX/PDF.</p><button id="send" disabled>Передать DOCX в приложение</button><a id="open-app" href="/" target="_blank" rel="noopener">Открыть подачу в приложении</a></section>
+</main></body></html>

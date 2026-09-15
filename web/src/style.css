@@ -28,3 +28,4 @@
 .scope-text mark {background:#ffe9a3;color:inherit;}
 .links-table td:nth-child(2) {max-width:480px;overflow-wrap:anywhere;}
 .links-table td:nth-child(2) button {display:block;margin-top:8px;font-size:12px;}
+:root .word-workflow-grid{display:grid;grid-template-columns:1fr 1fr;gap:32px;margin-top:24px}.word-workflow-grid ol{padding-left:22px}.word-workflow-grid li{margin:12px 0}.edition-report{padding:18px;border:1px solid #b7d4d5;background:#f0f8f7;border-radius:8px;margin:18px 0}.edition-report li{margin:8px 0;overflow-wrap:anywhere}.export-history{margin-top:36px;padding-top:24px;border-top:1px solid #dbe2ea}.export-history article{padding:18px 0;border-bottom:1px solid #dbe2ea}.export-history h3{font-size:16px}.export-history li{overflow-wrap:anywhere}@media(max-width:800px){:root .word-workflow-grid{grid-template-columns:1fr}}
