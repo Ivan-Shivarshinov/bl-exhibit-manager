@@ -76,7 +76,8 @@ def paragraphs(parts):
     return root, rows
 
 
-def scan(data, documents, saved=None):
+def scan(data, documents, saved=None, project_id=None):
+    from .word_bridge import paragraph_links
     parts = package(data)
     _, paras = paragraphs(parts)
     saved = saved or {}
@@ -92,7 +93,10 @@ def scan(data, documents, saved=None):
                     pattern=r'\s+'.join(re.escape(part) for part in name.split())
                     spans.update((m.start(), m.end()) for m in re.finditer(r"(?<!"+boundary+")"+pattern+r"(?!"+boundary+")", text, re.I))
         # Prefer the longer mention when a title contains its identifier.
-        chosen = [(r['start'],r['end']) for r in saved.values() if r.get('custom') and r['fid']==fid and r['paragraph']==pi and text[r['start']:r['end']]==r['mention']]
+        managed = paragraph_links(parts, p, project_id)
+        managed_by_span = {(r['start'], r['end']): r for r in managed}
+        chosen = list(managed_by_span)
+        chosen += [(r['start'],r['end']) for r in saved.values() if r.get('custom') and r['fid']==fid and r['paragraph']==pi and text[r['start']:r['end']]==r['mention'] and not any(r['start'] < b and r['end'] > a for a,b in chosen)]
         for a, b in sorted(spans, key=lambda s: (-(s[1]-s[0]), s[0])):
             if not any(a < y and b > x for x, y in chosen):
                 chosen.append((a, b))
@@ -103,6 +107,15 @@ def scan(data, documents, saved=None):
                           [match_key(str(d.get("identifier", ""))), match_key(d["title"]),
                            *[match_key(x) for x in d.get("aliases", [])]]]
             key = f"{fid}:{pi}:{a}:{b}"
+            if (a, b) in managed_by_span:
+                marker = managed_by_span[(a, b)]
+                target = marker['target'] if any(d['id'] == marker['target'] for d in documents) else None
+                previous = saved.get(key)
+                manual = bool(previous and previous.get('manual') and previous.get('mention') == mention)
+                if manual: target = previous.get('target')
+                paragraph_refs.append({**marker, 'target': target, 'key': key, 'fid': fid, 'footnote': ordinal,
+                                       'paragraph': pi, 'candidates': [target] if target else [], 'manual': manual})
+                continue
             prev = saved.get(key)
             target = prev.get("target") if prev and prev.get("mention") == mention else (candidates[0] if len(candidates) == 1 else None)
             paragraph_refs.append({"key": key, "fid": fid, "footnote": ordinal, "paragraph": pi, "start": a, "end": b,
@@ -114,7 +127,7 @@ def scan(data, documents, saved=None):
         by_id={d['id']:d for d in documents}
         for ref in paragraph_refs:
             prior=consolidated[-1] if consolidated else None
-            if prior and prior['target'] and prior['target']==ref['target'] and not ref.get('custom') and not saved.get(ref['key'],{}).get('scope_manual'):
+            if prior and not prior.get('managed') and not ref.get('managed') and prior['target'] and prior['target']==ref['target'] and not ref.get('custom') and not saved.get(ref['key'],{}).get('scope_manual'):
                 doc=by_id.get(prior['target'],{})
                 between=text[prior['end']:ref['start']]
                 if match_key(prior['mention'])==match_key(doc.get('identifier','')) and match_key(ref['mention'])!=match_key(doc.get('identifier','')) and re.match(r'\s*,',between) and ';' not in between and not citations.LOCATOR.search(between):
@@ -123,6 +136,10 @@ def scan(data, documents, saved=None):
         paragraph_refs=consolidated
         citations.propose(text,paragraph_refs)
         for ref in paragraph_refs:
+            if ref.get('managed'):
+                ref.update(link_start=ref['start'], link_end=ref['end'], link_text=ref['mention'],
+                           scope_review=ref['mention'] != ref['managed']['expected'])
+                continue
             prev=saved.get(ref['key'])
             if prev and prev.get('scope_manual') and prev['mention']==ref['mention']:
                 ref.update({k:prev[k] for k in ('link_start','link_end','link_text','scope_manual')})
@@ -253,6 +270,11 @@ def add_links(data, references, paths):
                 E.SubElement(rels, f"{{{REL}}}Relationship", Id=rid, Type=R+"/hyperlink", Target=target, TargetMode="External")
                 existing[target] = rid
             wrap(p, *citations.bounds(ref), rid)
+    from .word_bridge import parse_link
+    used = {node.get(f'{{{R}}}id') for node in root.findall('.//w:hyperlink', NS)}
+    for rel in list(rels):
+        if rel.get('Id') not in used and parse_link(rel.get('Target', '')):
+            rels.remove(rel)
     parts[FOOT] = E.tostring(root, xml_declaration=True, encoding="UTF-8", standalone=True)
     parts[RELS] = E.tostring(rels, xml_declaration=True, encoding="UTF-8", standalone=True)
     out = BytesIO()
