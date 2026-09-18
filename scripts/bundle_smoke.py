@@ -48,7 +48,7 @@ def main():
                 raise AssertionError(f'{path}: HTTP {exc.code}: '+exc.read().decode(errors='replace')+'\n'+(log.read_text('utf-8',errors='replace')[-16000:] if log.exists() else 'No server log')) from exc
         try:
             command('--no-browser')
-            health=request('/api/health');assert health['version']=='0.1.3-rc.2'
+            health=request('/api/health');assert health['version']=='0.1.3-rc.3'
             html=request('/').decode();assert 'root' in html
             for asset in re.findall(r'(?:src|href)="(/assets/[^\"]+)"',html):assert len(request(asset))>100
             command('--no-browser') # Repeated start keeps the existing process/data.
@@ -65,6 +65,13 @@ def main():
             request(f'/api/projects/{pid}/documents/{did}/review/document',{})
             package=request(f'/api/projects/{pid}/export',{})
             with ZipFile(BytesIO(package)) as z:assert any(p.endswith('.pdf') for p in z.namelist())
+            # Finished exhibits need neither stamping nor per-document approval.
+            project=request(f'/api/projects/{pid}/upload?name=Finished.pdf&mode=passthrough',raw=source)
+            assert project['documents'][-1]['ready'] and not project['documents'][-1]['approved']
+            project=request(f'/api/projects/{pid}/ready-pdfs',{'document_ids':[did]})
+            assert all(d['mode']=='passthrough' and d['ready'] for d in project['documents'])
+            with ZipFile(BytesIO(request(f'/api/projects/{pid}/export',{}))) as z:
+                for name in ('Sample.pdf','Finished.pdf'):assert z.read('Submission/'+name)==source
             before={str(p.relative_to(data)):p.read_bytes() for p in data.rglob('project.json')};assert before
             command('--stop');time.sleep(.3)
             # Move the application folder as an update/install-path change, retaining external data.
@@ -73,7 +80,7 @@ def main():
             command('--no-browser');assert request(f'/api/projects/{pid}')['documents'][0]['number']==1
             after={str(p.relative_to(data)):p.read_bytes() for p in data.rglob('project.json')};assert before==after
             assert (folder/'LICENSE').is_file() and (folder/'THIRD-PARTY-NOTICES/PYTHON-LICENSE.txt').is_file()
-            print(json.dumps({'bundle':archive.name,'platform':sys.platform,'version':health['version'],'checks':['isolated start','static UI','duplicate start','demo DOCX/PDF','PDFium rendering','structured extraction','PDF ZIP export','graceful stop','relocation and project persistence','licenses'],'result':'passed'}))
+            print(json.dumps({'bundle':archive.name,'platform':sys.platform,'version':health['version'],'checks':['isolated start','static UI','duplicate start','demo DOCX/PDF','PDFium rendering','structured extraction','PDF ZIP export','ready PDF upload and batch byte preservation','graceful stop','relocation and project persistence','licenses'],'result':'passed'}))
         finally:
             command('--stop')
 

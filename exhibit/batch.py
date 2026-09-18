@@ -7,7 +7,7 @@ from reportlab.pdfgen import canvas
 from . import pdf
 from .identifiers import stamp_label
 from .project import (DEFAULT_STYLE, DEFAULT_LABELS, NEW_LAYOUT, LEGACY_LAYOUT, check_format, digest, effective_format,
-                      group_key, identifier, overrides, revision, safe_path)
+                      group_key, identifier, overrides, revision, safe_path, document_ready)
 
 
 def snapshot(p, d):
@@ -117,7 +117,7 @@ def plan(store, original, request):
             d["approved"] = revision(p, d)
         if before != after:
             changes.append({"id": did, "title": d["title"], "before": before, "after": after,
-                            "requires_review": d["approved"] != revision(p, d)})
+                            "requires_review": not document_ready(p, d)})
     conflicts = [x for x in store.validate(p) if x["code"] in ("duplicate_id", "duplicate_path", "path_hierarchy", "source", "main")]
     for change in changes:
         d = by_id[change["id"]]

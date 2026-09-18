@@ -69,6 +69,12 @@ def revision(p, doc):
     return review_digest(effective, style)
 
 
+def document_ready(p, doc):
+    # Choosing an existing, finished PDF does not claim a visual review.
+    # Source integrity, paths and reference targets are validated separately.
+    return doc["mode"] == "passthrough" or doc["approved"] == revision(p, doc)
+
+
 def safe_path(folder, filename):
     joined = f"{folder}/{filename}" if folder else filename
     if "\\" in joined or joined.startswith("/") or len(joined) > 200:
@@ -157,7 +163,9 @@ class Store:
                 return doc
         raise ValueError("Документ не найден.")
 
-    def upload(self, p, name, data, kind="original", did=None):
+    def upload(self, p, name, data, kind="original", did=None, mode="prepare"):
+        if mode not in ("prepare", "passthrough") or (mode == "passthrough" and (kind != "original" or did)):
+            raise ValueError("Загрузка готового PDF доступна только для нового приложения.")
         source = self.put(p, name, data, "docx" if kind == "main" else "pdf")
         if kind == "main":
             p["main"] = source
@@ -177,7 +185,7 @@ class Store:
         else:
             stem = Path(name).stem
             doc = {"id": uuid4().hex, "title": stem, "prefix": "", "number": None, "designation": "Exhibit",
-                   "filename": Path(name).name, "folder": "", "language": "", "mode": "prepare",
+                   "filename": Path(name).name, "folder": "", "language": "", "mode": mode,
                    "original_label": "[Original]", "translation_label": "[Translation]", "original": source,
                    "translation": None, "translation_confirmed": False, "approved": None, "aliases": [],
                    "selection": [{"page": n+1} for n in range(source["pages"])], "translation_selection": [], "style": None,
@@ -187,6 +195,22 @@ class Store:
             p["scanned"] = False
         self.save(p)
         return p
+
+    def use_originals(self, p, ids):
+        if not isinstance(ids, list) or not ids or any(not isinstance(x, str) for x in ids) or len(set(ids)) != len(ids):
+            raise ValueError("Выберите документы для использования без обработки.")
+        proposed = deepcopy(p)
+        selected = [self.document(proposed, did) for did in ids]
+        translated = [d for d in selected if d["translation"]]
+        if translated:
+            raise ValueError(f"У документа «{translated[0]['title']}» прикреплён перевод. Открепите перевод или снимите выбор этого документа. Ничего не изменено.")
+        for doc in selected:
+            self.source(proposed, doc["original"])
+            doc["mode"] = "passthrough"
+            # A later return to preparation must require a fresh visual check.
+            doc["approved"] = None
+        self.save(proposed)
+        return proposed
 
     def update(self, p, did, changes, persist=True):
         if not changes.keys() <= EDITABLE:
@@ -223,6 +247,8 @@ class Store:
         if "style" in changes:
             for key in set(DEFAULT_STYLE) | set(LEGACY_LAYOUT): layer.pop(key, None)
             layer.update(changes["style"] or {})
+        if "mode" in changes and changes["mode"] != doc["mode"]:
+            doc["approved"] = None
         doc.update(changes)
         doc["format_overrides"] = layer
         if "filename" in changes:
@@ -365,7 +391,7 @@ class Store:
                     self.source(p, d["translation"])
                     if not d["translation_confirmed"]:
                         issue("translation", "Перевод ожидает проверки.", d["id"])
-                if d["approved"] != revision(p, d):
+                if not document_ready(p, d):
                     issue("unreviewed", "Просмотрите результат и подтвердите подготовку.", d["id"])
             except ValueError as exc:
                 issue("source", str(exc), d["id"])
@@ -453,7 +479,7 @@ class Store:
         result = deepcopy(p)
         for d in result["documents"]:
             d["identifier"] = identifier(d,p)
-            d["ready"] = d["approved"] == revision(p, d)
+            d["ready"] = document_ready(p, d)
             d["effective_format"], d["format_sources"] = effective_format(p, d)
             d["format_overrides"] = overrides(d)
             d["filename_mode"] = d.get("filename_mode", "manual")

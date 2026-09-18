@@ -86,14 +86,21 @@ def get_project(pid: str):
 
 
 @app.post("/api/projects/{pid}/upload")
-async def upload(pid: str, request: Request, name: str, kind: str = "original", did: str | None = None):
+async def upload(pid: str, request: Request, name: str, kind: str = "original", did: str | None = None, mode: str = "prepare"):
     data = bytearray()
     async for chunk in request.stream():
         data.extend(chunk)
         if len(data) > 50_000_000:
             raise ValueError("Максимальный размер файла — 50 МБ.")
     with LOCK:
-        return store.public(store.upload(store.load(pid), name, bytes(data), kind, did))
+        return store.public(store.upload(store.load(pid), name, bytes(data), kind, did, mode))
+
+
+@app.post("/api/projects/{pid}/ready-pdfs")
+async def ready_pdfs(pid: str, request: Request):
+    body = await request.json()
+    with LOCK:
+        return store.public(store.use_originals(store.load(pid), body.get("document_ids")))
 
 
 @app.post("/api/projects/{pid}/documents/{did}")

@@ -28,3 +28,5 @@
 .scope-text mark {background:#ffe9a3;color:inherit;}
 .links-table td:nth-child(2) {max-width:480px;overflow-wrap:anywhere;}
 .links-table td:nth-child(2) button {display:block;margin-top:8px;font-size:12px;}
+.ready-pdf-upload{padding:12px;margin-bottom:14px;background:#eff7f8;border:1px solid #d3e5e7;border-radius:6px}.ready-pdf-upload p{margin:8px 0;font-size:13px;line-height:1.5}.ready-pdf-upload .button{display:inline-flex;white-space:normal}
+@media(max-width:950px){.document-list{max-height:none}.document-list .table-scroll{flex:none;max-height:320px}}
