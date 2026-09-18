@@ -236,7 +236,7 @@ def add_links(data, references, paths):
     rels = xml(parts[RELS]) if RELS in parts else E.Element(f"{{{REL}}}Relationships", nsmap={None: REL})
     existing = {x.get("Target"): x.get("Id") for x in rels if x.get("Type", "").endswith("/hyperlink") and x.get("TargetMode") == "External"}
     ids = {x.get("Id") for x in rels}
-    for fid, _, pi, p in rows:
+    for fid, ordinal, pi, p in rows:
         refs = [r for r in references if r["fid"] == fid and r["paragraph"] == pi]
         citations.validate(text_of(p),refs)
         for ref in sorted(refs, key=lambda r: citations.bounds(r)[0], reverse=True):
@@ -252,7 +252,10 @@ def add_links(data, references, paths):
                 ids.add(rid)
                 E.SubElement(rels, f"{{{REL}}}Relationship", Id=rid, Type=R+"/hyperlink", Target=target, TargetMode="External")
                 existing[target] = rid
-            wrap(p, *citations.bounds(ref), rid)
+            try:
+                wrap(p, *citations.bounds(ref), rid)
+            except ValueError as exc:
+                raise ValueError(f"Сноска {ordinal}: {exc}") from exc
     parts[FOOT] = E.tostring(root, xml_declaration=True, encoding="UTF-8", standalone=True)
     parts[RELS] = E.tostring(rels, xml_declaration=True, encoding="UTF-8", standalone=True)
     out = BytesIO()

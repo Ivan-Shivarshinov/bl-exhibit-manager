@@ -46,7 +46,7 @@ jobs:
           name: office-review-${{ matrix.target }}
           path: output/feedback-office
       - run: python scripts/build_bundle.py
-      - run: python scripts/bundle_smoke.py release/BLExhibitManager-0.1.2-${{ matrix.target }}.zip
+      - run: python scripts/bundle_smoke.py release/BLExhibitManager-0.1.3-rc.1-${{ matrix.target }}.zip
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: pilot-${{ matrix.target }}
