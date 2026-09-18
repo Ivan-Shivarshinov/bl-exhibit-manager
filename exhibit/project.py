@@ -284,14 +284,17 @@ class Store:
         self.save(p)
         return p
 
-    def map_reference(self, p, key, target, all_same=False):
-        self.document(p, target)
+    def map_reference(self, p, key, target, all_same=False, keep_original=False):
+        if type(keep_original) is not bool or (keep_original and target is not None):
+            raise ValueError("Выберите файл либо вариант «Без файла».")
+        if target is not None:
+            self.document(p, target)
         ref = next((r for r in p["references"] if r["key"] == key), None)
         if not ref:
             raise ValueError("Упоминание не найдено.")
         for r in p["references"]:
             if r["key"] == key or (all_same and r["mention"] == ref["mention"]):
-                r.update(target=target, manual=True)
+                r.update(target=target, manual=True, keep_original=keep_original)
         p["links_reviewed"] = False
         self.save(p)
         return p
@@ -331,7 +334,7 @@ class Store:
     def confirm_links(self, p):
         if not p.get("scanned"):
             raise ValueError("Запустите сопоставление заново.")
-        if any(not r["target"] for r in p["references"]):
+        if any(not r["target"] and not r.get('keep_original') for r in p["references"]):
             raise ValueError("Остались несопоставленные упоминания.")
         word.add_links(self.source(p, p["main"]), p["references"], {d["id"]: safe_path(d["folder"], d["filename"]) for d in p["documents"]})
         p["links_reviewed"] = True
@@ -342,8 +345,8 @@ class Store:
         issues, ids, paths = [], {}, ({"main document.docx": None, "main document.pdf": None} if p["main"] else {})
         def issue(code, message, doc=None, ref=None):
             issues.append({"code": code, "message": message, "document": doc, "reference": ref, "blocking": True})
-        if not p["documents"]:
-            issue("empty", "Добавьте хотя бы один PDF.")
+        if not p["documents"] and not p["main"]:
+            issue("empty", "Добавьте PDF или основной DOCX.")
         for d in p["documents"]:
             ident = identifier(d,p)
             if d["mode"] == "prepare" and effective_format(p, d)[0]["designation"] and d["number"] is None:
@@ -379,7 +382,7 @@ class Store:
                 issue("links_review", "Перепроверьте сноски и подтвердите сопоставление.")
             doc_ids = {d["id"] for d in p["documents"]}
             for r in p["references"]:
-                if r["target"] not in doc_ids:
+                if not r.get('keep_original') and r["target"] not in doc_ids:
                     issue("unmatched", f"Сноска {r['footnote']}: не сопоставлено «{r['mention']}».", ref=r["key"])
         return issues
 

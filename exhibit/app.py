@@ -140,7 +140,7 @@ def scan(pid: str):
 async def map_reference(pid: str, request: Request):
     b = await request.json()
     with LOCK:
-        return store.public(store.map_reference(store.load(pid), b["key"], b["target"], b.get("all_same", False)))
+        return store.public(store.map_reference(store.load(pid), b["key"], b["target"], b.get("all_same", False), b.get("keep_original", False)))
 
 
 @app.post("/api/projects/{pid}/references/add")

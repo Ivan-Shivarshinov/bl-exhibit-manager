@@ -13,6 +13,9 @@ REL = "http://schemas.openxmlformats.org/package/2006/relationships"
 NS = {"w": W, "r": R}
 FOOT = "word/footnotes.xml"
 RELS = "word/_rels/footnotes.xml.rels"
+RUN_ATOMS = {f'{{{W}}}{name}': value for name,value in (
+    ('tab','\t'),('br','\n'),('cr','\n'),('noBreakHyphen','\u2011'),('softHyphen','\u00ad'))}
+RUN_MARKERS = {f'{{{W}}}{name}' for name in ('footnoteRef','lastRenderedPageBreak')}
 IDENT = re.compile(r"(?<![\w-])[A-Z][A-Z0-9]*(?:-[A-Z][A-Z0-9]*)*-\d+(?![\w-])", re.I)
 UNPREFIXED = re.compile(r"(?<![\w-])(?:Annex|Exhibit)\s+\d+(?![\w-])", re.I)
 
@@ -54,10 +57,8 @@ def text_of(node):
     for x in node.iter():
         if x.tag == f"{{{W}}}t":
             out.append(x.text or "")
-        elif x.tag == f"{{{W}}}tab":
-            out.append("\t")
-        elif x.tag in (f"{{{W}}}br", f"{{{W}}}cr"):
-            out.append("\n")
+        elif x.tag in RUN_ATOMS:
+            out.append(RUN_ATOMS[x.tag])
     return "".join(out)
 
 
@@ -107,7 +108,9 @@ def scan(data, documents, saved=None):
             target = prev.get("target") if prev and prev.get("mention") == mention else (candidates[0] if len(candidates) == 1 else None)
             paragraph_refs.append({"key": key, "fid": fid, "footnote": ordinal, "paragraph": pi, "start": a, "end": b,
                            "mention": mention, "target": target, "candidates": candidates,
-                           "manual": bool(prev and prev.get("manual")), **({'custom':True} if prev and prev.get('custom') else {})})
+                           "manual": bool(prev and prev.get("manual")),
+                           "keep_original": bool(prev and prev.get('mention') == mention and prev.get('keep_original')),
+                           **({'custom':True} if prev and prev.get('custom') else {})})
         # Identifier followed by this same document's known title is one citation.
         # Keep the identifier anchor stable for saved choices and range edits.
         consolidated=[]
@@ -136,10 +139,49 @@ def run_piece(run, start, end):
     for child in list(clone):
         if child.tag != f"{{{W}}}rPr":
             clone.remove(child)
-    t = E.SubElement(clone, f"{{{W}}}t")
-    t.set("{http://www.w3.org/XML/1998/namespace}space", "preserve")
-    t.text = text_of(run)[start:end]
+    pos = 0
+    for child in run:
+        if child.tag == f'{{{W}}}rPr': continue
+        length = len(text_of(child))
+        a,b = max(0,start-pos),min(length,end-pos)
+        if a < b:
+            piece = deepcopy(child)
+            if child.tag == f'{{{W}}}t':
+                piece.text = (child.text or '')[a:b]
+                piece.set('{http://www.w3.org/XML/1998/namespace}space','preserve')
+            clone.append(piece)
+        pos += length
     return clone
+
+
+def split_layout_runs(p, start, end):
+    """Isolate Word's layout atoms; never turn breaks/tabs into ordinary text."""
+    allowed = {f'{{{W}}}rPr',f'{{{W}}}t'} | RUN_ATOMS.keys() | RUN_MARKERS
+    pos = 0
+    for child in list(p):
+        length = len(text_of(child))
+        if pos < end and pos+length > start:
+            if child.tag == f'{{{W}}}hyperlink':
+                split_layout_runs(child,max(0,start-pos),min(length,end-pos))
+            elif child.tag == f'{{{W}}}r':
+                unsupported = [x for x in child if x.tag not in allowed]
+                if unsupported:
+                    names = ', '.join(sorted({E.QName(x).localname for x in unsupported}))
+                    raise ValueError(f'Неподдерживаемая структура внутри упоминания ({names}); DOCX не изменён.')
+                if any(x.tag in RUN_ATOMS or x.tag in RUN_MARKERS for x in child):
+                    index = p.index(child)
+                    for atom in child:
+                        if atom.tag == f'{{{W}}}rPr': continue
+                        run = deepcopy(child)
+                        run[:] = [deepcopy(x) for x in child if x.tag == f'{{{W}}}rPr']
+                        run.append(deepcopy(atom))
+                        p.insert(index,run);index += 1
+                    p.remove(child)
+        pos += length
+
+
+def supported_run(run):
+    return run.tag == f'{{{W}}}r' and all(x.tag in ({f'{{{W}}}rPr',f'{{{W}}}t'} | RUN_ATOMS.keys()) for x in run)
 
 
 def neutral_link_style(run):
@@ -159,6 +201,7 @@ def wrap(p, start, end, rid):
     # Complex fields / revisions require a later, separately verified OOXML implementation.
     if p.xpath(".//w:fldChar | .//w:fldSimple | .//w:ins | .//w:del | .//w:sdt", namespaces=NS):
         raise ValueError("Ссылка находится в поле, исправлении или элементе управления Word; требуется ручная обработка этой сноски.")
+    split_layout_runs(p,start,end)
     pos = 0
     for child in list(p):
         length = len(text_of(child))
@@ -174,7 +217,7 @@ def wrap(p, start, end, rid):
                 elif cursor >= end or cursor + size <= start:
                     groups[0 if cursor + size <= start else 2].append(deepcopy(part))
                 else:
-                    if part.tag != f"{{{W}}}r" or any(x.tag not in (f"{{{W}}}rPr", f"{{{W}}}t") for x in part):
+                    if not supported_run(part):
                         raise ValueError("Неподдерживаемая структура существующей ссылки; DOCX не изменён.")
                     a, b = max(0, start-cursor), min(size, end-cursor)
                     if a: groups[0].append(run_piece(part, 0, a))
@@ -200,7 +243,7 @@ def wrap(p, start, end, rid):
         length = len(text_of(child))
         a, b = max(start-pos, 0), min(end-pos, length)
         if a < b:
-            if child.tag != f"{{{W}}}r" or any(x.tag not in (f"{{{W}}}rPr", f"{{{W}}}t") for x in child):
+            if not supported_run(child):
                 raise ValueError("Неподдерживаемая структура внутри упоминания; DOCX не изменён.")
             index = p.index(child)
             pieces = []
@@ -231,7 +274,7 @@ def wrap(p, start, end, rid):
 def add_links(data, references, paths):
     parts = package(data)
     root, rows = paragraphs(parts)
-    if not references:
+    if not any(not r.get('keep_original') for r in references):
         return data
     rels = xml(parts[RELS]) if RELS in parts else E.Element(f"{{{REL}}}Relationships", nsmap={None: REL})
     existing = {x.get("Target"): x.get("Id") for x in rels if x.get("Type", "").endswith("/hyperlink") and x.get("TargetMode") == "External"}
@@ -239,7 +282,7 @@ def add_links(data, references, paths):
     for fid, ordinal, pi, p in rows:
         refs = [r for r in references if r["fid"] == fid and r["paragraph"] == pi]
         citations.validate(text_of(p),refs)
-        for ref in sorted(refs, key=lambda r: citations.bounds(r)[0], reverse=True):
+        for ref in sorted((r for r in refs if not r.get('keep_original')), key=lambda r: citations.bounds(r)[0], reverse=True):
             if text_of(p)[ref["start"]:ref["end"]] != ref["mention"]:
                 raise ValueError("Текст сноски изменился. Повторите сопоставление.")
             target = quote(paths[ref["target"]], safe="/")
