@@ -458,7 +458,7 @@ class Store:
     def main_pdf_key(self, p):
         data, paths = self.linked_main(p)
         # ZIP entry timestamps are irrelevant to the rendered document.
-        key = digest({"parts": {k: sha256(v).hexdigest() for k, v in word.package(data).items()}, "paths": paths, "version": 2})
+        key = digest({"parts": {k: sha256(v).hexdigest() for k, v in word.package(data).items()}, "paths": paths, "version": main_pdf.CONVERSION_VERSION})
         return key, data, paths
 
     def main_pdf_status(self, p):
