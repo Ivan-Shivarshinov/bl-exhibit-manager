@@ -12,14 +12,20 @@ async function api(path, body, binary=false, headers={}) {
 async function run(task) {
   if (busy) return; busy=true; $('error').hidden=true;
   const controls=[...document.querySelectorAll('button,input,select')]; const states=controls.map(c=>c.disabled); controls.forEach(c=>c.disabled=true);
-  try { await task(); } catch(e) { $('error').textContent=e.message || String(e); $('error').hidden=false; }
+  try { await task(); } catch(e) {
+    $('error').textContent=e.message || String(e); $('error').hidden=false;
+    $('error').scrollIntoView({block:'nearest'});
+  }
   finally { controls.forEach((c,i)=>c.disabled=states[i]); busy=false; render(); }
 }
 function clearPlan() { plan=null; $('updates').replaceChildren(); $('apply').hidden=true; }
 function preview() {
   const doc=catalog?.documents.find(d=>d.id===selected); $('selected').textContent=doc?.title || 'Выберите приложение выше.';
   $('citation-preview').replaceChildren(); if(!doc)return;
-  const strong=document.createElement('strong');strong.textContent=doc[$('form').value];$('citation-preview').append(strong);
+  const text=doc[$('form').value], ident=doc.identifier;
+  if(ident && (text===ident || text.startsWith(ident+','))) {
+    const strong=document.createElement('strong');strong.textContent=ident;$('citation-preview').append(strong,document.createTextNode(text.slice(ident.length)));
+  } else $('citation-preview').append(document.createTextNode(text));
   if($('pinpoint').value.trim())$('citation-preview').append(document.createTextNode(catalog.style.locator_separator+$('pinpoint').value.trim()));
 }
 function render() {

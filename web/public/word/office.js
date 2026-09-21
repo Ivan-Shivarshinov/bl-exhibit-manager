@@ -1,13 +1,5 @@
-import {citationUrl, updatePlan, verifyPlan} from './core.js';
-
-function uniform(range) {
-  range.font.bold = true; range.font.italic = false; range.font.color = '#000000'; range.font.underline = 'None';
-}
-
-function plain(range) {
-  range.hyperlink = ''; range.font.bold = false; range.font.italic = false;
-  range.font.underline = 'None'; range.font.color = '#000000';
-}
+import {citationUrl, parseCitation, updatePlan, verifyPlan} from './core.js';
+import {citationOoxml} from './citation-ooxml.js';
 
 async function editable(context) {
   context.document.load('changeTrackingMode');
@@ -22,26 +14,30 @@ export async function insertCitation(catalog, documentId, form, pinpoint, existi
     await editable(context);
     const selection = context.document.getSelection();
     selection.parentBody.load('type,text'); await context.sync();
-    let position;
+    let position, before = '';
     if (existing) {
-      if (selection.parentBody.type !== 'Footnote') throw new Error('Поставьте курсор в текст существующей сноски внизу страницы.');
-      position = selection.parentBody.getRange('End');
-      if (selection.parentBody.text.trim()) {
-        const separator = position.insertText(catalog.style.separator, 'After');
-        plain(separator); position = separator.getRange('End');
+      // A selection inside a note can report the generic NoteItem body type.
+      // Find its actual footnote, rather than accepting endnotes or the whole story.
+      const notes = context.document.body.footnotes;
+      notes.load('items'); await context.sync();
+      const locations = notes.items.map(note => selection.compareLocationWith(note.body.getRange()));
+      await context.sync();
+      const index = locations.findIndex(result => ['Equal', 'Inside', 'InsideStart', 'InsideEnd'].includes(result.value));
+      if (index < 0) throw new Error('Поставьте курсор в текст существующей сноски внизу страницы.');
+      const body = notes.items[index].body;
+      body.load('text'); await context.sync();
+      position = body.getRange('End');
+      if (body.text.trim()) {
+        before = catalog.style.separator;
       }
     } else {
       if (selection.parentBody.type !== 'MainDoc') throw new Error('Для новой сноски поставьте курсор в основной текст документа.');
       const note = selection.insertFootnote('');
       position = note.body.getRange('End');
     }
-    const range = position.insertText(doc[form], 'After');
-    range.hyperlink = citationUrl(location.origin, catalog.id, doc.id, doc[form], form, crypto.randomUUID().replaceAll('-', ''));
-    uniform(range);
-    if (pinpoint.trim()) {
-      const suffix = range.getRange('End').insertText(catalog.style.locator_separator + pinpoint.trim(), 'After');
-      plain(suffix);
-    }
+    const address = citationUrl(location.origin, catalog.id, doc.id, doc[form], form, crypto.randomUUID().replaceAll('-', ''));
+    const after = pinpoint.trim() ? catalog.style.locator_separator + pinpoint.trim() : '';
+    position.insertOoxml(citationOoxml(doc[form], doc.identifier, address, before, after), 'After');
     await context.sync();
   });
 }
@@ -76,8 +72,8 @@ export async function applyUpdates(catalog, plan, indices) {
     if (selected.some(row => row.status !== 'update')) throw new Error('Ручные изменения нельзя перезаписать автоматически.');
     // All reads and validation precede mutations. Only the linked range is replaced.
     for (const row of selected.reverse()) {
-      const range = ranges[row.index].insertText(row.next, 'Replace');
-      range.hyperlink = row.nextAddress; uniform(range);
+      const doc = catalog.documents.find(d => d.id === parseCitation(row.nextAddress)?.document);
+      ranges[row.index].insertOoxml(citationOoxml(row.next, doc?.identifier || '', row.nextAddress), 'Replace');
     }
     await context.sync();
     return selected.length;
