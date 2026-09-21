@@ -48,7 +48,7 @@ def main():
                 raise AssertionError(f'{path}: HTTP {exc.code}: '+exc.read().decode(errors='replace')+'\n'+(log.read_text('utf-8',errors='replace')[-16000:] if log.exists() else 'No server log')) from exc
         try:
             command('--no-browser')
-            health=request('/api/health');assert health['version']=='0.1.3-rc.3'
+            health=request('/api/health');assert health['version']=='0.1.3-rc.4'
             html=request('/').decode();assert 'root' in html
             for asset in re.findall(r'(?:src|href)="(/assets/[^\"]+)"',html):assert len(request(asset))>100
             command('--no-browser') # Repeated start keeps the existing process/data.
@@ -72,6 +72,12 @@ def main():
             assert all(d['mode']=='passthrough' and d['ready'] for d in project['documents'])
             with ZipFile(BytesIO(request(f'/api/projects/{pid}/export',{}))) as z:
                 for name in ('Sample.pdf','Finished.pdf'):assert z.read('Submission/'+name)==source
+            folders={'action':'folders','destinations':{d['id']:"Exhibits/Respondent's Evidence" for d in project['documents']}}
+            preview=request(f'/api/projects/{pid}/batch/preview',folders)
+            assert not preview['conflicts']
+            project=request(f'/api/projects/{pid}/batch/apply',{'request':folders,'token':preview['token']})
+            with ZipFile(BytesIO(request(f'/api/projects/{pid}/export',{}))) as z:
+                for name in ('Sample.pdf','Finished.pdf'):assert z.read("Submission/Exhibits/Respondent's Evidence/"+name)==source
             before={str(p.relative_to(data)):p.read_bytes() for p in data.rglob('project.json')};assert before
             command('--stop');time.sleep(.3)
             # Move the application folder as an update/install-path change, retaining external data.

@@ -18,7 +18,7 @@ def snapshot(p, d):
 
 
 def plan(store, original, request):
-    if not isinstance(request, dict) or request.get("action") not in ("organize", "format"):
+    if not isinstance(request, dict) or request.get("action") not in ("organize", "format", "folders"):
         raise ValueError("Выберите массовую операцию.")
     p = deepcopy(original)
     ids = request.get("document_ids", [])
@@ -26,7 +26,20 @@ def plan(store, original, request):
         raise ValueError("Некорректный список выбранных документов.")
     selected = [store.document(p, did) for did in ids]
     warnings = []
-    if request["action"] == "organize":
+    if request['action'] == 'folders':
+        destinations = request.get('destinations')
+        if not isinstance(destinations, dict) or not destinations:
+            raise ValueError('Выберите документы и папки назначения.')
+        for did, folder in destinations.items():
+            if not isinstance(folder,str): raise ValueError('Введите название папки.')
+            store.update(p, did, {'folder':folder}, persist=False)
+        # Paths do not change which exhibit a mention refers to. Conversion cache
+        # keys include paths, so DOCX/PDF links will be rebuilt at export time.
+        if all(identifier(d,original)==identifier(store.document(p,d['id']),p) for d in original['documents']):
+            p['scanned'] = original.get('scanned',False)
+            p['links_reviewed'] = original.get('links_reviewed',False)
+        warnings.append('Главный DOCX и PDF останутся в корне Submission. Ссылки в новом комплекте будут построены с учётом папок. После сборки сохраняйте структуру папок.')
+    elif request["action"] == "organize":
         if not selected:
             raise ValueError("Выберите документы для систематизации.")
         folder = request.get("folder")
@@ -107,6 +120,9 @@ def plan(store, original, request):
     for did in order:
         d, old = by_id[did], original_docs[did]
         before, after = snapshot(original, old), snapshot(p, d)
+        if (request['action']=='folders' and old['approved']==revision(original,old)
+                and before['format']==after['format']):
+            d['approved'] = revision(p,d)
         if before['identifier'] != after['identifier']:
             p['links_reviewed']=False
             p['scanned']=False
@@ -121,7 +137,7 @@ def plan(store, original, request):
     conflicts = [x for x in store.validate(p) if x["code"] in ("duplicate_id", "duplicate_path", "path_hierarchy", "source", "main")]
     for change in changes:
         d = by_id[change["id"]]
-        if d["mode"] == "passthrough": continue
+        if d["mode"] == "passthrough" or (request['action']=='folders' and change['before']['format']==change['after']['format']): continue
         values, _ = effective_format(p, d)
         right = stamp_label({**d,'designation':values['designation']})
         try:

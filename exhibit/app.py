@@ -154,7 +154,15 @@ async def map_reference(pid: str, request: Request):
 async def add_reference(pid: str, request: Request):
     b = await request.json()
     with LOCK:
-        return store.public(store.add_reference(store.load(pid), b["fid"], b["paragraph"], b["mention"]))
+        return store.public(store.add_reference(store.load(pid), b["fid"], b["paragraph"], b["mention"], b.get('start'), b.get('end'), b.get('target')))
+
+
+@app.post("/api/projects/{pid}/references/exclude")
+async def exclude_reference(pid: str, request: Request):
+    b = await request.json()
+    if type(b.get('restore',False)) is not bool: raise ValueError('Некорректное действие.')
+    with LOCK:
+        return store.public(store.exclude_reference(store.load(pid), b['key'], b.get('restore',False)))
 
 
 @app.post("/api/projects/{pid}/references/confirm")

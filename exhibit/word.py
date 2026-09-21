@@ -18,6 +18,16 @@ RUN_ATOMS = {f'{{{W}}}{name}': value for name,value in (
 RUN_MARKERS = {f'{{{W}}}{name}' for name in ('footnoteRef','lastRenderedPageBreak')}
 IDENT = re.compile(r"(?<![\w-])[A-Z][A-Z0-9]*(?:-[A-Z][A-Z0-9]*)*-\d+(?![\w-])", re.I)
 UNPREFIXED = re.compile(r"(?<![\w-])(?:Annex|Exhibit)\s+\d+(?![\w-])", re.I)
+CASE_CONTEXT = re.compile(r'(?:\bcase\s*(?:no\.?|number|№)?|\bдел[аоу]?\s*(?:№|номер)?)\s*[:#]?\s*$', re.I)
+
+
+def identifier_spans(text):
+    """Do not interpret a fragment of a case number as an exhibit identifier."""
+    for match in IDENT.finditer(text):
+        a, b = match.span()
+        if text[max(0,a-1):a] == '/' or text[b:b+1] == '/' or CASE_CONTEXT.search(text[:a]):
+            continue
+        yield a, b
 
 
 def match_key(value):
@@ -77,7 +87,7 @@ def paragraphs(parts):
     return root, rows
 
 
-def scan(data, documents, saved=None):
+def scan(data, documents, saved=None, excluded=()):
     parts = package(data)
     _, paras = paragraphs(parts)
     saved = saved or {}
@@ -85,13 +95,16 @@ def scan(data, documents, saved=None):
     for fid, ordinal, pi, p in paras:
         text = text_of(p)
         footnotes.append({"footnote": ordinal, "fid": fid, "paragraph": pi, "text": text})
-        spans = {(m.start(), m.end()) for pattern in (IDENT,UNPREFIXED) for m in pattern.finditer(text)}
+        spans = set(identifier_spans(text)) | {m.span() for m in UNPREFIXED.finditer(text)}
         for d in documents:
             for name in [d.get("identifier", ""), d["title"], *d.get("aliases", [])]:
                 if name.strip() and not name.strip().isdigit():
-                    boundary = r"[\w-]" if IDENT.fullmatch(name) else r"\w"
+                    boundary = r"[\w/-]" if IDENT.fullmatch(name) else r"\w"
                     pattern=r'\s+'.join(re.escape(part) for part in name.split())
                     spans.update((m.start(), m.end()) for m in re.finditer(r"(?<!"+boundary+")"+pattern+r"(?!"+boundary+")", text, re.I))
+        # Exclusions apply to this occurrence, not to the document's text.
+        blocked = [(r['start'],r['end']) for r in excluded if r['fid']==fid and r['paragraph']==pi and text[r['start']:r['end']]==r['mention']]
+        spans = {(a,b) for a,b in spans if not any(a < y and b > x for x,y in blocked)}
         # Prefer the longer mention when a title contains its identifier.
         chosen = [(r['start'],r['end']) for r in saved.values() if r.get('custom') and r['fid']==fid and r['paragraph']==pi and text[r['start']:r['end']]==r['mention']]
         for a, b in sorted(spans, key=lambda s: (-(s[1]-s[0]), s[0])):
@@ -184,20 +197,20 @@ def supported_run(run):
     return run.tag == f'{{{W}}}r' and all(x.tag in ({f'{{{W}}}rPr',f'{{{W}}}t'} | RUN_ATOMS.keys()) for x in run)
 
 
-def neutral_link_style(run):
-    """Make managed links uniformly black, bold and upright; retain font and size."""
+def neutral_link_style(run, bold=False):
+    """Keep source typography; only the exhibit designation receives bold."""
     props=run.find('w:rPr',NS)
     if props is None:
         props=E.Element(f'{{{W}}}rPr');run.insert(0,props)
     order='rStyle rFonts b bCs i iCs caps smallCaps strike dstrike outline shadow emboss imprint noProof snapToGrid vanish webHidden color spacing w kern position sz szCs highlight u effect bdr shd fitText vertAlign rtl cs em lang eastAsianLayout specVanish oMath rPrChange'.split()
-    for name,value in (('b','1'),('bCs','1'),('i','0'),('iCs','0'),('color','000000'),('u','none')):
+    for name,value in [('color','000000'),('u','none')] + ([('b','1'),('bCs','1')] if bold else []):
         for old in props.findall('w:'+name,NS):props.remove(old)
         element=E.Element(f'{{{W}}}{name}',{f'{{{W}}}val':value})
         index=next((i for i,child in enumerate(props) if E.QName(child).localname in order and order.index(E.QName(child).localname)>order.index(name)),len(props))
         props.insert(index,element)
 
 
-def wrap(p, start, end, rid):
+def wrap(p, start, end, rid, bold_span=None):
     # Complex fields / revisions require a later, separately verified OOXML implementation.
     if p.xpath(".//w:fldChar | .//w:fldSimple | .//w:ins | .//w:del | .//w:sdt", namespaces=NS):
         raise ValueError("Ссылка находится в поле, исправлении или элементе управления Word; требуется ручная обработка этой сноски.")
@@ -249,14 +262,17 @@ def wrap(p, start, end, rid):
             pieces = []
             if a:
                 pieces.append(run_piece(child, 0, a))
-            mid = run_piece(child, a, b)
-            pieces.append(mid)
+            cuts = sorted({a,b} | {point-pos for point in (bold_span or ()) if a < point-pos < b})
+            mids = [run_piece(child,x,y) for x,y in zip(cuts,cuts[1:])]
+            for mid,x,y in zip(mids,cuts,cuts[1:]):
+                neutral_link_style(mid, bool(bold_span and bold_span[0] <= pos+x and pos+y <= bold_span[1]))
+            pieces.extend(mids)
             if b < length:
                 pieces.append(run_piece(child, b, length))
             for offset, piece in enumerate(pieces):
                 p.insert(index+offset, piece)
             p.remove(child)
-            selected.append(mid)
+            selected.extend(mids)
         pos += length
     if not selected:
         raise ValueError("Упоминание изменилось. Повторите сопоставление.")
@@ -267,7 +283,6 @@ def wrap(p, start, end, rid):
     link = E.Element(f"{{{W}}}hyperlink", {f"{{{R}}}id": rid})
     p.insert(first, link)
     for child in middle:
-        if child.tag==f'{{{W}}}r':neutral_link_style(child)
         link.append(child)
 
 
@@ -296,7 +311,10 @@ def add_links(data, references, paths):
                 E.SubElement(rels, f"{{{REL}}}Relationship", Id=rid, Type=R+"/hyperlink", Target=target, TargetMode="External")
                 existing[target] = rid
             try:
-                wrap(p, *citations.bounds(ref), rid)
+                start,end = citations.bounds(ref)
+                label = UNPREFIXED.match(text_of(p), start) or IDENT.match(text_of(p), start)
+                bold_span = label.span() if label and label.end() <= end else None
+                wrap(p, start, end, rid, bold_span)
             except ValueError as exc:
                 raise ValueError(f"Сноска {ordinal}: {exc}") from exc
     parts[FOOT] = E.tostring(root, xml_declaration=True, encoding="UTF-8", standalone=True)

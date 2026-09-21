@@ -170,6 +170,7 @@ class Store:
         if kind == "main":
             p["main"] = source
             p["references"], p["footnotes"] = [], []
+            p['excluded_references'] = []
             p["links_reviewed"] = False
             p["scanned"] = False
         elif did:
@@ -299,7 +300,7 @@ class Store:
             raise ValueError("Сначала загрузите основной DOCX.")
         saved = {r["key"]: r for r in p["references"] if r.get("manual") or r.get('scope_manual')}
         documents = [{**d, "identifier": identifier(d,p)} for d in p["documents"]]
-        found = word.scan(self.source(p, p["main"]), documents, saved)
+        found = word.scan(self.source(p, p["main"]), documents, saved, p.get('excluded_references', []))
         # Preserve explicit user-added free-text spans while the source is unchanged.
         keys = {r["key"] for r in found["references"]}
         for r in p["references"]:
@@ -325,20 +326,56 @@ class Store:
         self.save(p)
         return p
 
-    def add_reference(self, p, fid, pi, mention):
+    def exclude_reference(self, p, key, restore=False):
+        proposed = deepcopy(p)
+        source = proposed.setdefault('excluded_references', []) if restore else proposed['references']
+        ref = next((r for r in source if r['key']==key), None)
+        if ref is None: raise ValueError('Упоминание не найдено. Обновите список.')
+        source.remove(ref)
+        if restore:
+            para = next(f for f in p['footnotes'] if f['fid']==ref['fid'] and f['paragraph']==ref['paragraph'])
+            peers = [r for r in proposed['references'] if r['fid']==ref['fid'] and r['paragraph']==ref['paragraph']]
+            automatic = deepcopy([*peers,ref])
+            citations.propose(para['text'], automatic)
+            by_key = {r['key']:r for r in automatic}
+            for item in [*peers,ref]:
+                if not item.get('scope_manual'):
+                    item.update({k:by_key[item['key']][k] for k in ('link_start','link_end','link_text','scope_review')})
+            citations.validate(para['text'], [*peers,ref])
+            # Restoring even a now-unrecognized identifier is an explicit choice.
+            ref.update(custom=True, manual=True)
+            proposed['references'].append(ref)
+            proposed['links_reviewed'] = False
+            self.save(proposed)
+        else:
+            proposed.setdefault('excluded_references', []).append(ref)
+            self.scan(proposed)
+        p.update(proposed)
+        return p
+
+    def add_reference(self, p, fid, pi, mention, start=None, end=None, target=None):
         para = next((x for x in p["footnotes"] if x["fid"] == fid and x["paragraph"] == pi), None)
         if not para or not mention.strip():
             raise ValueError("Выберите сноску и точный текст упоминания.")
-        matches = list(re.finditer(re.escape(mention), para["text"]))
+        if target is not None: self.document(p, target)
+        if start is not None or end is not None:
+            if type(start) is not int or type(end) is not int or not 0 <= start < end <= len(para['text']) or para['text'][start:end] != mention:
+                raise ValueError('Выделите точный текст ссылки в сноске.')
+            spans = [(start,end)]
+        else:
+            spans = [m.span() for m in re.finditer(re.escape(mention), para['text'])]
+        matches = spans
         if not matches:
             raise ValueError("Текст не найден в этой сноске.")
         added = 0
-        for m in matches:
-            if any(r["fid"] == fid and r["paragraph"] == pi and citations.bounds(r)[0] < m.end() and citations.bounds(r)[1] > m.start() for r in p["references"]):
+        for a,b in matches:
+            if any(r["fid"] == fid and r["paragraph"] == pi and citations.bounds(r)[0] < b and citations.bounds(r)[1] > a for r in p["references"]):
                 continue
-            p["references"].append({"key": f"{fid}:{pi}:{m.start()}:{m.end()}", "fid": fid,
-                "footnote": para["footnote"], "paragraph": pi, "start": m.start(), "end": m.end(),
-                "mention": mention, "target": None, "candidates": [], "manual": True, "custom": True})
+            p["references"].append({"key": f"{fid}:{pi}:{a}:{b}", "fid": fid,
+                "footnote": para["footnote"], "paragraph": pi, "start": a, "end": b,
+                "mention": mention, "target": target, "candidates": [], "manual": True, "custom": True,
+                "link_start":a, "link_end":b, "link_text":mention, "scope_manual":True})
+            p['excluded_references'] = [r for r in p.get('excluded_references', []) if not (r['fid']==fid and r['paragraph']==pi and a < r['end'] and b > r['start'])]
             added += 1
         if not added:
             raise ValueError("Упоминание уже сопоставляется или пересекается с другим.")
