@@ -25,9 +25,11 @@ def bitmap_emf(image=None, extra=b'', pixel_format=0xE200B):
         image.paste((30, 220, 70, 255), (0, 40, 60, 80))
         image.paste((230, 200, 20, 255), (60, 40, 120, 80))
     w, h = image.size
-    rawmode = 'BGRa' if pixel_format == 0xE200B else 'BGRA'
-    pixels = image.tobytes('raw', rawmode)
-    bitmap = struct.pack('<IIiiiII', 0xDBC01002, 1, w, h, w*4, pixel_format, 0) + pixels
+    mode, rawmode, channels = {0xE200B:('RGBA','BGRa',4), 0x26200A:('RGBA','BGRA',4),
+                               0x21808:('RGB','BGR',3), 0x22009:('RGB','BGRX',4)}[pixel_format]
+    stride = ((w*channels + 3)//4)*4
+    pixels = image.convert(mode).tobytes('raw', rawmode, stride)
+    bitmap = struct.pack('<IIiiiII', 0xDBC01002, 1, w, h, stride, pixel_format, 0) + pixels
     commands = b''.join([
         plus_record(0x4001, 1, struct.pack('<4I', 0xDBC01002, 1, 96, 96)),
         plus_record(0x4030, 2, struct.pack('<f', 1)),
@@ -116,6 +118,10 @@ class OfficeCompatibility(unittest.TestCase):
             translucent = Image.new('RGBA', (2,2), (255,0,0,128))
             result = Image.open(BytesIO(office_compat.emf_bitmap_png(bitmap_emf(translucent, pixel_format=fmt))))
             self.assertEqual(result.getpixel((0,0)), (255,0,0,128))
+        for fmt in [0x21808, 0x22009]:
+            odd_width = Image.new('RGB', (3,2), (220,60,10))
+            result = Image.open(BytesIO(office_compat.emf_bitmap_png(bitmap_emf(odd_width, pixel_format=fmt))))
+            self.assertEqual(result.getpixel((2,1)), (220,60,10,255))
 
     def test_only_disposable_parts_change(self):
         source = fixture(); original = word.package(source)
