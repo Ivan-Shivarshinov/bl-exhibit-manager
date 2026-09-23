@@ -65,6 +65,19 @@ def main():
             request(f'/api/projects/{pid}/documents/{did}/review/document',{})
             package=request(f'/api/projects/{pid}/export',{})
             with ZipFile(BytesIO(package)) as z:assert any(p.endswith('.pdf') for p in z.namelist())
+            # Finished exhibits need neither stamping nor per-document approval.
+            project=request(f'/api/projects/{pid}/upload?name=Finished.pdf&mode=passthrough',raw=source)
+            assert project['documents'][-1]['ready'] and not project['documents'][-1]['approved']
+            project=request(f'/api/projects/{pid}/ready-pdfs',{'document_ids':[did]})
+            assert all(d['mode']=='passthrough' and d['ready'] for d in project['documents'])
+            with ZipFile(BytesIO(request(f'/api/projects/{pid}/export',{}))) as z:
+                for name in ('Sample.pdf','Finished.pdf'):assert z.read('Submission/'+name)==source
+            folders={'action':'folders','destinations':{d['id']:"Exhibits/Respondent's Evidence" for d in project['documents']}}
+            preview=request(f'/api/projects/{pid}/batch/preview',folders)
+            assert not preview['conflicts']
+            project=request(f'/api/projects/{pid}/batch/apply',{'request':folders,'token':preview['token']})
+            with ZipFile(BytesIO(request(f'/api/projects/{pid}/export',{}))) as z:
+                for name in ('Sample.pdf','Finished.pdf'):assert z.read("Submission/Exhibits/Respondent's Evidence/"+name)==source
             before={str(p.relative_to(data)):p.read_bytes() for p in data.rglob('project.json')};assert before
             command('--stop');time.sleep(.3)
             # Move the application folder as an update/install-path change, retaining external data.
@@ -73,7 +86,7 @@ def main():
             command('--no-browser');assert request(f'/api/projects/{pid}')['documents'][0]['number']==1
             after={str(p.relative_to(data)):p.read_bytes() for p in data.rglob('project.json')};assert before==after
             assert (folder/'LICENSE').is_file() and (folder/'THIRD-PARTY-NOTICES/PYTHON-LICENSE.txt').is_file()
-            print(json.dumps({'bundle':archive.name,'platform':sys.platform,'version':health['version'],'checks':['isolated start','static UI','duplicate start','demo DOCX/PDF','PDFium rendering','structured extraction','PDF ZIP export','graceful stop','relocation and project persistence','licenses'],'result':'passed'}))
+            print(json.dumps({'bundle':archive.name,'platform':sys.platform,'version':health['version'],'checks':['isolated start','static UI','duplicate start','demo DOCX/PDF','PDFium rendering','structured extraction','PDF ZIP export','ready PDF upload and batch byte preservation','graceful stop','relocation and project persistence','licenses'],'result':'passed'}))
         finally:
             command('--stop')
 

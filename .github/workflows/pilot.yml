@@ -41,6 +41,12 @@ jobs:
       - name: Verify real LibreOffice conversion and full citation links
         if: runner.os == 'macOS'
         run: python scripts/verify_feedback_office.py --output output/feedback-office
+      - name: Verify retained web citations and mixed Word runs
+        if: runner.os == 'macOS'
+        run: python scripts/verify_reference_options_office.py --output output/feedback-office/reference-options
+      - name: Verify bitmap images, TOC and relative links in LibreOffice PDF
+        if: runner.os == 'macOS'
+        run: python scripts/verify_office_images.py --output output/feedback-office/images
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always() && runner.os == 'macOS'
         with:

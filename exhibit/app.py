@@ -142,7 +142,7 @@ def word_open(pid: str, did: str, cid: str):
 
 
 @app.post("/api/projects/{pid}/upload")
-async def upload(pid: str, request: Request, name: str, kind: str = "original", did: str | None = None):
+async def upload(pid: str, request: Request, name: str, kind: str = "original", did: str | None = None, mode: str = "prepare"):
     data = bytearray()
     async for chunk in request.stream():
         data.extend(chunk)
@@ -153,7 +153,14 @@ async def upload(pid: str, request: Request, name: str, kind: str = "original", 
         expected = request.headers.get('X-Exhibit-Main-Sha')
         if kind == 'main' and expected is not None and expected != (project.get('main') or {}).get('sha256', ''):
             raise ValueError('Основной DOCX в подаче изменился. Обновите список в панели Word и проверьте выбранную подачу перед повторной передачей.')
-        return store.public(store.upload(project, name, bytes(data), kind, did))
+        return store.public(store.upload(project, name, bytes(data), kind, did, mode))
+
+
+@app.post("/api/projects/{pid}/ready-pdfs")
+async def ready_pdfs(pid: str, request: Request):
+    body = await request.json()
+    with LOCK:
+        return store.public(store.use_originals(store.load(pid), body.get("document_ids")))
 
 
 @app.post("/api/projects/{pid}/documents/{did}")
@@ -200,14 +207,22 @@ def scan(pid: str):
 async def map_reference(pid: str, request: Request):
     b = await request.json()
     with LOCK:
-        return store.public(store.map_reference(store.load(pid), b["key"], b["target"], b.get("all_same", False)))
+        return store.public(store.map_reference(store.load(pid), b["key"], b["target"], b.get("all_same", False), b.get("keep_original", False)))
 
 
 @app.post("/api/projects/{pid}/references/add")
 async def add_reference(pid: str, request: Request):
     b = await request.json()
     with LOCK:
-        return store.public(store.add_reference(store.load(pid), b["fid"], b["paragraph"], b["mention"]))
+        return store.public(store.add_reference(store.load(pid), b["fid"], b["paragraph"], b["mention"], b.get('start'), b.get('end'), b.get('target')))
+
+
+@app.post("/api/projects/{pid}/references/exclude")
+async def exclude_reference(pid: str, request: Request):
+    b = await request.json()
+    if type(b.get('restore',False)) is not bool: raise ValueError('Некорректное действие.')
+    with LOCK:
+        return store.public(store.exclude_reference(store.load(pid), b['key'], b.get('restore',False)))
 
 
 @app.post("/api/projects/{pid}/references/confirm")

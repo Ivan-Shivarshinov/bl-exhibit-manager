@@ -32,7 +32,7 @@ def citation_docx(texts):
 
 
 class CitationFeedback(TestCase):
-    def test_uniform_link_stops_before_pinpoint_and_preserves_its_italic_style(self):
+    def test_only_identifier_bold_and_title_and_pinpoint_keep_italic(self):
         text='R-19, Training Response, dated 10 April 2026, paras. 9-10.'
         parts=word.package(citation_docx([text]));root,rows=word.paragraphs(parts)
         run=rows[0][-1].find('w:r',word.NS);props=E.Element(f'{{{word.W}}}rPr');run.insert(0,props)
@@ -47,20 +47,22 @@ class CitationFeedback(TestCase):
         link=para.find('w:hyperlink',word.NS)
         self.assertEqual(word.text_of(link),'R-19, Training Response, dated 10 April 2026')
         self.assertEqual(link.find('w:r/w:rPr/w:b',word.NS).get(f'{{{word.W}}}val'),'1')
-        self.assertEqual(link.find('w:r/w:rPr/w:i',word.NS).get(f'{{{word.W}}}val'),'0')
+        self.assertIsNotNone(link.find('w:r/w:rPr/w:i',word.NS))
+        runs=link.findall('w:r',word.NS)
+        self.assertEqual(word.text_of(runs[0]),'R-19')
+        self.assertEqual(runs[1].find('w:rPr/w:b',word.NS).get(f'{{{word.W}}}val'),'0')
+        self.assertIsNotNone(runs[1].find('w:rPr/w:i',word.NS))
         suffix=para.find('w:r',word.NS)
         self.assertEqual(word.text_of(suffix),', paras. 9-10.')
         self.assertEqual(E.tostring(suffix.find('w:rPr',word.NS)),original_style)
-    def test_uniform_bold_style_overrides_theme_and_italic_but_keeps_font_and_size(self):
+    def test_link_style_overrides_color_but_keeps_original_typography(self):
         run=E.Element(f'{{{word.W}}}r');props=E.SubElement(run,f'{{{word.W}}}rPr')
         for name,attrs in [('rFonts',{'ascii':'Times New Roman'}),('b',{}),('i',{}),('color',{'val':'996699','themeColor':'hyperlink'}),('sz',{'val':'20'}),('u',{'val':'single','themeColor':'hyperlink'})]:
             E.SubElement(props,f'{{{word.W}}}{name}',{f'{{{word.W}}}{key}':value for key,value in attrs.items()})
-        changed={'b','bCs','i','iCs','color','u'}
+        changed={'color','u'}
         preserved=[E.tostring(x) for x in props if E.QName(x).localname not in changed]
         word.neutral_link_style(run)
         self.assertEqual([E.tostring(x) for x in props if E.QName(x).localname not in changed],preserved)
-        for name,value in [('b','1'),('bCs','1'),('i','0'),('iCs','0')]:
-            self.assertEqual(props.find('w:'+name,word.NS).get(f'{{{word.W}}}val'),value)
         self.assertEqual(props.find('w:color',word.NS).attrib,{f'{{{word.W}}}val':'000000'})
         self.assertEqual(props.find('w:u',word.NS).attrib,{f'{{{word.W}}}val':'none'})
         first=E.tostring(run);word.neutral_link_style(run);self.assertEqual(first,E.tostring(run))
