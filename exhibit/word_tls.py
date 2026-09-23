@@ -1,9 +1,25 @@
 """Optional HTTPS listener for Office, sharing the existing process and Store lock."""
 import json
+import logging
 from pathlib import Path
 import threading
 import time
 import uvicorn
+
+
+def start_optional(app, root, http_port):
+    """A broken add-in setup must not prevent ordinary document preparation."""
+    app.state.word_connection = {'configured': False}
+    try:
+        return start(app, root, http_port)
+    except (ValueError, OSError, KeyError, TypeError):
+        logging.getLogger(__name__).warning('Optional Word connection is unavailable', exc_info=True)
+        app.state.word_connection = {
+            'configured': False,
+            'message': 'Подключение панели Word недоступно. Проверьте настройку сертификата и свободный HTTPS-порт. '
+                       'Можно продолжить работу через обычную загрузку DOCX и PDF.',
+        }
+        return None
 
 
 def start(app, root, http_port):

@@ -1,0 +1,26 @@
+schema: spec-driven
+context: |
+  Open Source Exhibit Manager (current name: BL Exhibit Manager), Apache-2.0.
+  Local application for preparing legal exhibits and portable linked submissions.
+  Python/FastAPI, React/Vite, PDF and OOXML processing. Windows and macOS are equal targets.
+  Read docs/ROADMAP.md for product scope and openspec/README.md for baseline/version boundaries.
+  Specs describe accepted observable behavior; changes describe unfinished work. A task checked
+  as implemented does not mean released or verified on every platform. docs/WORKSTATE.md is
+  a brief local handoff, not the requirements source. Inspect Git before changing code.
+  The Word taskpane is OPTIONAL. Uploading existing DOCX/PDF, preparing exhibits, translations,
+  and exporting must work without the taskpane or its certificate. A PDF converter is a separate dependency.
+  Preserve source documents, unrelated formatting and existing links. Never delete unsupported
+  Word elements just to export. Documents stay local except text explicitly sent for translation.
+  Claude and Codex are equal optional translation providers. No private documents or credentials in Git.
+  Bold only the exhibit identifier, preserve other source emphasis; link the stable title, not page locators.
+  Write project artifacts in Russian; retain OpenSpec headings, SHALL and WHEN/THEN syntax.
+rules:
+  proposal:
+    - State whether scope is approved, proposed, or migration of already approved work; do not infer approval from roadmap ideas.
+    - Identify user-visible outcome and non-goals; do not copy conversation history.
+  specs:
+    - Include concrete success and failure scenarios, especially preservation and optional-dependency behavior.
+    - Do not present an unverified or branch-only feature as released baseline behavior.
+  tasks:
+    - Link acceptance work to scenarios and distinguish automated, real application and user-confirmed evidence.
+    - Leave unverified integration/platform tasks unchecked; do not require repeat approval for work already authorized.

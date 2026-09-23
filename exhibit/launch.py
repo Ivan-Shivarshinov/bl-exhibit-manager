@@ -43,7 +43,7 @@ def serve(port):
                         level=logging.WARNING,force=True,
                         format="%(asctime)s %(name)s %(levelname)s %(message)s")
     server=uvicorn.Server(uvicorn.Config(app,host="127.0.0.1",port=port,access_log=False,log_level="warning",log_config=None))
-    from .word_tls import start as start_word
+    from .word_tls import start_optional as start_word
     word_server = start_word(app, ROOT, port)
     def stop_servers():
         server.should_exit = True

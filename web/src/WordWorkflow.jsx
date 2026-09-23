@@ -20,8 +20,9 @@ export default function WordWorkflow({p, api, mutate, busy, onDirty}) {
   useEffect(()=>{setStyle({name_form:'full',separator:'; ',locator_separator:', ',...p.citation_style});onDirty(false);},[p.citation_style]);
   function change(next) {setStyle(next);onDirty(JSON.stringify(next)!==JSON.stringify({name_form:'full',separator:'; ',locator_separator:', ',...p.citation_style}));}
   useEffect(()=>{let live=true;api('/word/status').then(value=>{if(live)setConnection(value);}).catch(e=>{if(live)setError(e.message);});return()=>{live=false;};},[]);
-  return <section className="links-page"><h1>Работа в Microsoft Word</h1><p>Панель Word вставляет сноски и обновляет названия приложений. Готовый комплект сохраняет обычные ссылки и открывается без панели.</p>
+  return <section className="links-page"><h1>Работа в Microsoft Word</h1><p>Панель Word — необязательное дополнение для создания сносок и обновления названий. Можно работать без неё: загрузить готовый DOCX, сопоставить ссылки и собрать комплект в основном приложении.</p>
     {error?<p role="alert">{error}</p>:null}
+    {connection?.message?<p role="alert">{connection.message}</p>:null}
     <div className="word-workflow-grid"><section><h2>Подключение</h2>{connection?.configured?<><p className="success-note">Локальное HTTPS-подключение настроено: {connection.origin}</p><a className="button" href="/api/word/manifest">Скачать манифест Word</a><p>Установите манифест в Word по инструкции. В панели выберите подачу «{p.name}».</p></>:<p>Панель требует однократной настройки локального HTTPS-сертификата и установки надстройки в Word. Основное приложение продолжает работать без этой настройки.</p>}
     <a className="button" href="/api/word/instructions" target="_blank" rel="noopener">Открыть инструкцию подключения</a>
     <ol><li>В Word поставьте курсор в основной текст и выберите приложение в панели.</li><li>Укажите страницу или параграф и нажмите «Создать сноску в Word».</li><li>После изменения номеров или названий нажмите «Проверить ссылки» и примените выбранные изменения.</li><li>Сохраните Word и передайте DOCX в приложение кнопкой панели. Проверьте сноски и соберите комплект.</li></ol></section>

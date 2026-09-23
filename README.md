@@ -103,6 +103,8 @@ sh Start.command
 
 ## Разработка и проверки
 
+Карта продукта и состояние возможностей — [ROADMAP](docs/ROADMAP.md). Требования и незавершённые изменения ведутся в [OpenSpec](openspec/README.md). Панель Word в ветке разработки — опциональное дополнение; обычная загрузка DOCX/PDF сохраняется.
+
 ```powershell
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 npm.cmd run build --prefix web
