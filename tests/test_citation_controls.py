@@ -73,14 +73,14 @@ class CitationControls(TestCase):
         self.assertEqual(len(self.p['references']),3)
         self.assertEqual(self.s.source(self.p,self.p['main']),self.data)
 
-    def test_exclusion_is_per_occurrence_and_new_docx_clears_it(self):
+    def test_exclusion_is_per_occurrence_and_identical_upload_preserves_it(self):
         self.scan('XYZ-123; XYZ-123.')
         self.s.exclude_reference(self.p,self.p['references'][0]['key'])
         self.s.scan(self.p)
         self.assertEqual(len(self.p['references']),1)
         self.s.upload(self.p,'New.docx',self.data,'main'); self.s.scan(self.p)
-        self.assertEqual(len(self.p['references']),2)
-        self.assertEqual(self.p['excluded_references'],[])
+        self.assertEqual(len(self.p['references']),1)
+        self.assertEqual(len(self.p['excluded_references']),1)
 
     def test_selected_occurrence_with_unicode_and_mapping_survives_scan(self):
         text = '😀 Training Submission, para. 1; Training Submission, para. 2; Annex 39, Title, p. 3.'

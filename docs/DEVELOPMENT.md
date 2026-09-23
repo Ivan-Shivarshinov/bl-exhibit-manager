@@ -39,6 +39,7 @@ sh Start.command
 ```powershell
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 npm.cmd run build --prefix web
+node --test web/tests/*.test.js
 ```
 
 На macOS замените пути Python и `npm.cmd` на `.venv/bin/python` и `npm`. Тесты используют временные папки и явные имитации моделей, не расходуют подписки. Word/LibreOffice, реальный вход и пользовательские переходы проверяются отдельно.

@@ -1,6 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {insertCitation} from '../public/word/office.js';
+import {insertCitation, inspectUpdates, applyUpdates} from '../public/word/office.js';
+import {citationUrl} from '../public/word/core.js';
 
 const catalog={id:'a'.repeat(32),documents:[{id:'b'.repeat(32),identifier:'RLA-1',full:'RLA-1, Code'}],style:{separator:'; ',locator_separator:', '}};
 
@@ -40,4 +41,44 @@ test('tracked changes block mutation before creating citation XML',async()=>{
   const writes=host(['Inside'],'NoteItem','TrackAll');
   await assert.rejects(insertCitation(catalog,catalog.documents[0].id,'full','',true),/исправлений/);
   assert.equal(writes.length,0);
+});
+
+function updateHost() {
+  const writes=[], state={xml:'original',tracking:'Off'};
+  const ranges=[0,1].map(i=>({text:'RLA-1, Old',hyperlink:citationUrl('https://localhost:8769',catalog.id,catalog.documents[0].id,'RLA-1, Old','full',String(i).repeat(32)),
+    getOoxml:()=>({value:state.xml}),insertOoxml:(xml)=>writes.push({i,xml})}));
+  globalThis.Word={run:fn=>fn({sync:async()=>{},document:{load(){},get changeTrackingMode(){return state.tracking;},
+    body:{footnotes:{load(){},items:[{body:{getRange:()=>({getHyperlinkRanges:()=>({load(){},items:ranges})})}}]}}}})};
+  globalThis.location={origin:'https://localhost:8769'};
+  return {writes,state,ranges};
+}
+
+test('prepare all updates before writes; refusal of one leaves every citation untouched',async()=>{
+  const {writes}=updateHost(); const plan=await inspectUpdates(catalog);
+  let count=0;
+  globalThis.fetch=async()=>({ok:++count===1,json:async()=>({ooxml:'prepared',detail:'Mixed formatting'})});
+  await assert.rejects(applyUpdates(catalog,plan,[0,1]),/Mixed formatting/);
+  assert.deepEqual(writes,[]);
+});
+
+test('formatting or tracking change during preparation prevents all writes',async()=>{
+  for(const mutation of ['format','tracking']) {
+    const {writes,state}=updateHost(); const plan=await inspectUpdates(catalog);
+    globalThis.fetch=async()=>{
+      if(mutation==='format') state.xml='edited'; else state.tracking='TrackAll';
+      return {ok:true,json:async()=>({ooxml:'prepared'})};
+    };
+    await assert.rejects(applyUpdates(catalog,plan,[0]),/изменилось|исправлений/);
+    assert.deepEqual(writes,[]);
+  }
+});
+
+test('successful updates apply prepared source formatting in reverse document order',async()=>{
+  const {writes}=updateHost(); const plan=await inspectUpdates(catalog);
+  globalThis.fetch=async(_,request)=>{
+    assert.equal(JSON.parse(request.body).ooxml,'original');
+    return {ok:true,json:async()=>({ooxml:'preserved typography'})};
+  };
+  assert.equal(await applyUpdates(catalog,plan,[0,1]),2);
+  assert.deepEqual(writes,[{i:1,xml:'preserved typography'},{i:0,xml:'preserved typography'}]);
 });

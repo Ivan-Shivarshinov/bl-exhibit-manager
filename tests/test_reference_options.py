@@ -84,7 +84,7 @@ class ReferenceOptions(TestCase):
         self.s.confirm_links(p);self.assertEqual(self.s.validate(p),[])
         self.assertEqual(self.s.linked_main(p)[0],self.data)
         self.s.upload(p,'Replacement.docx',self.data,'main')
-        self.s.scan(p);self.assertFalse(any(r['keep_original'] for r in p['references']))
+        self.s.scan(p);self.assertTrue(all(r['keep_original'] for r in p['references']))
 
 
 class MixedWordRuns(TestCase):

@@ -70,10 +70,27 @@ export async function applyUpdates(catalog, plan, indices) {
     if (!verifyPlan(plan.links, links)) throw new Error('Текст Word изменился после проверки. Повторите проверку ссылок.');
     const selected = plan.rows.filter(row => indices.includes(row.index));
     if (selected.some(row => row.status !== 'update')) throw new Error('Ручные изменения нельзя перезаписать автоматически.');
-    // All reads and validation precede mutations. Only the linked range is replaced.
-    for (const row of selected.reverse()) {
+    const fragments = selected.map(row => ranges[row.index].getOoxml());
+    await context.sync();
+    // Prepare every replacement before changing any range: preserve source typography
+    // or reject the whole operation if a title has ambiguous mixed formatting.
+    const prepared = await Promise.all(selected.map(async (row, i) => {
       const doc = catalog.documents.find(d => d.id === parseCitation(row.nextAddress)?.document);
-      ranges[row.index].insertOoxml(citationOoxml(row.next, doc?.identifier || '', row.nextAddress), 'Replace');
+      const response = await fetch('/api/word/rewrite', {method:'POST', headers:{'Content-Type':'application/json','X-Exhibit-Local':'1'},
+        body:JSON.stringify({ooxml:fragments[i].value,expected:row.old,replacement:row.next,address:row.nextAddress,identifier:doc?.identifier || ''})});
+      const result = await response.json();
+      if (!response.ok) throw new Error(result.error || result.detail || 'Не удалось сохранить оформление ссылки.');
+      return {row, ooxml:result.ooxml};
+    }));
+    const fresh = await references(context);
+    if (!verifyPlan(links, fresh.links)) throw new Error('Текст Word изменился. Повторите проверку ссылок.');
+    // Formatting may also change while the request is in flight.
+    const freshXml = selected.map(row => fresh.ranges[row.index].getOoxml());
+    await context.sync();
+    if (freshXml.some((xml, i) => xml.value !== fragments[i].value)) throw new Error('Оформление Word изменилось. Повторите проверку ссылок.');
+    await editable(context);
+    for (const {row, ooxml} of prepared.reverse()) {
+      fresh.ranges[row.index].insertOoxml(ooxml, 'Replace');
     }
     await context.sync();
     return selected.length;

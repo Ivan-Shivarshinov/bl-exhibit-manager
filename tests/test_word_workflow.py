@@ -159,3 +159,48 @@ class WordWorkflow(TestCase):
         self.store.map_reference(self.p,self.p['references'][0]['key'],self.did)
         self.store.scan(self.p)
         self.assertEqual(self.p['references'][0]['target'],self.did)
+
+    def test_no_file_and_exclusion_survive_unique_move_and_restart(self):
+        texts = ['Annex 76, Video https://youtu.be/example?t=12', 'R-999, not an exhibit.', 'Special document, p. 2.']
+        self.store.upload(self.p,'Main.docx',citation_docx(texts),'main')
+        self.store.scan(self.p)
+        video, false = self.p['references']
+        self.store.map_reference(self.p,video['key'],None,keep_original=True)
+        self.store.exclude_reference(self.p,false['key'])
+        self.store.add_reference(self.p,'3',0,'Special document',target=self.did)
+        self.store.confirm_links(self.p)
+        self.store.upload(self.p,'Next.docx',citation_docx(['Nothing.']+texts),'main')
+        self.assertEqual(len(self.p['excluded_references']),1)
+        self.assertEqual(self.p['excluded_references'][0]['footnote'],3)
+        self.assertTrue(next(r for r in self.p['references'] if r['mention']=='Annex 76')['keep_original'])
+        self.assertEqual(next(r for r in self.p['references'] if r.get('custom'))['target'],self.did)
+        self.assertFalse(self.p['links_reviewed'])
+        self.p=self.store.load(self.p['id']); self.store.scan(self.p)
+        self.assertEqual(len(self.p['references']),2)
+        self.store.confirm_links(self.p)
+
+    def test_duplicate_exclusion_and_no_file_need_new_decision(self):
+        texts=['Annex 76, Video','R-999, not an exhibit.']
+        self.store.upload(self.p,'Main.docx',citation_docx(texts),'main');self.store.scan(self.p)
+        self.store.map_reference(self.p,self.p['references'][0]['key'],None,keep_original=True)
+        self.store.exclude_reference(self.p,self.p['references'][1]['key']);self.store.confirm_links(self.p)
+        self.store.upload(self.p,'Next.docx',citation_docx(texts*2),'main')
+        self.assertFalse(self.p['excluded_references'])
+        self.assertFalse(any(r.get('keep_original') for r in self.p['references']))
+        with self.assertRaises(ValueError):self.store.confirm_links(self.p)
+
+    def test_managed_no_file_survives_rescan(self):
+        data=self.managed_docx()
+        self.store.upload(self.p,'Managed.docx',data,'main')
+        self.store.map_reference(self.p,self.p['references'][0]['key'],None,keep_original=True)
+        self.store.scan(self.p);self.store.confirm_links(self.p)
+        self.assertTrue(self.p['references'][0]['keep_original'])
+
+    def test_ready_pdf_catalog_and_folder_history(self):
+        self.p=self.store.use_originals(self.p,[self.did])
+        self.assertTrue(word_bridge.catalog(self.p)['documents'][0]['ready'])
+        first=self.store.export(self.p);entry=history.list_exports(self.store,self.p)[0]
+        self.store.update(self.p,self.did,{'folder':'Exhibits/Authorities'})
+        second=self.store.export(self.p)
+        self.assertEqual(history.read_export(self.store,self.p,entry['id']),first)
+        with ZipFile(BytesIO(second)) as z:self.assertIn('Submission/Exhibits/Authorities/sample.pdf',z.namelist())

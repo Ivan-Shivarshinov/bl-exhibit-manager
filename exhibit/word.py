@@ -128,7 +128,8 @@ def scan(data, documents, saved=None, excluded=(), project_id=None):
                 manual = bool(previous and previous.get('manual') and previous.get('mention') == mention)
                 if manual: target = previous.get('target')
                 paragraph_refs.append({**marker, 'target': target, 'key': key, 'fid': fid, 'footnote': ordinal,
-                                       'paragraph': pi, 'candidates': [target] if target else [], 'manual': manual})
+                                       'paragraph': pi, 'candidates': [target] if target else [], 'manual': manual,
+                                       'keep_original': bool(manual and previous.get('keep_original'))})
                 continue
             prev = saved.get(key)
             target = prev.get("target") if prev and prev.get("mention") == mention else (candidates[0] if len(candidates) == 1 else None)

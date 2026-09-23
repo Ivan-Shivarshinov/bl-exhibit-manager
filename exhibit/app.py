@@ -111,6 +111,14 @@ def word_status():
     return getattr(app.state, 'word_connection', {'configured': False})
 
 
+@app.post('/api/word/rewrite')
+async def word_rewrite(request: Request):
+    from .word_bridge import rewrite_citation_ooxml
+    data = await request.json()
+    if not isinstance(data, dict): raise ValueError('Некорректный запрос Word.')
+    return {'ooxml': rewrite_citation_ooxml(data.get('ooxml'), data.get('expected'), data.get('replacement'), data.get('address'), data.get('identifier', ''))}
+
+
 @app.get('/api/word/manifest')
 def word_manifest():
     path = store.root / 'BLExhibitManager.Word.xml'

@@ -49,10 +49,10 @@ def parse_link(value):
 
 
 def catalog(project):
-    from .project import identifier, revision, digest
+    from .project import identifier, document_ready, digest
     documents = [{'id': d['id'], 'identifier': identifier(d, project), 'title': d['title'],
                   'short_title': d.get('short_title', ''), 'full': title(project, d),
-                  'short': title(project, d, 'short'), 'ready': d['approved'] == revision(project, d)}
+                  'short': title(project, d, 'short'), 'ready': document_ready(project, d)}
                  for d in project['documents']]
     result = {'id': project['id'], 'name': project['name'], 'documents': documents, 'style': settings(project),
               'main_sha': (project.get('main') or {}).get('sha256', '')}
@@ -84,3 +84,60 @@ def paragraph_links(parts, paragraph, project_id):
                               'managed': meta, 'target': meta['document'] if meta['project'] == project_id else None})
         position += len(text)
     return found
+
+
+def rewrite_citation_ooxml(data, expected, replacement, address, identifier=''):
+    """Preserve uniform identifier/title typography; reject ambiguous mixed edits."""
+    from copy import deepcopy
+    from lxml import etree as E
+    from . import word
+    if not all(isinstance(v, str) for v in (data, expected, replacement, address, identifier)) or len(data) > 2_000_000:
+        raise ValueError('Некорректный фрагмент Word.')
+    if not expected or not replacement or len(replacement) > 1000 or not parse_link(address):
+        raise ValueError('Некорректное обновление ссылки Word.')
+    try:
+        root = word.xml(data.encode('utf-8'))
+    except E.XMLSyntaxError as exc:
+        raise ValueError('Word вернул некорректный XML ссылки.') from exc
+    pkg = 'http://schemas.microsoft.com/office/2006/xmlPackage'
+    document = root.find(f"{{{pkg}}}part[@{{{pkg}}}name='/word/document.xml']")
+    relpart = root.find(f"{{{pkg}}}part[@{{{pkg}}}name='/word/_rels/document.xml.rels']")
+    if document is None or relpart is None:
+        raise ValueError('Word вернул неподдерживаемую структуру ссылки.')
+    links = document.findall('.//w:hyperlink', word.NS)
+    if len(links) != 1 or word.text_of(links[0]) != expected:
+        raise ValueError('Фрагмент ссылки изменился. Повторите проверку ссылок.')
+    link = links[0]
+    relation = next((r for r in relpart.iter() if r.tag == f'{{{word.REL}}}Relationship' and r.get('Id') == link.get(f'{{{word.R}}}id')), None)
+    if relation is None:
+        raise ValueError('Не найдена связь Word.')
+    if expected != replacement:
+        old_label = word.UNPREFIXED.match(expected) or word.IDENT.match(expected)
+        old_end = old_label.end() if old_label and (old_label.end() == len(expected) or expected[old_label.end():].startswith(',')) else 0
+        new_end = len(identifier) if identifier and (replacement == identifier or replacement.startswith(identifier+',')) else 0
+        groups = [[], []]
+        pos = 0
+        for run in link:
+            if run.tag != f'{{{word.W}}}r' or any(child.tag not in (f'{{{word.W}}}rPr', f'{{{word.W}}}t') for child in run):
+                raise ValueError('Сложное оформление ссылки: обновите её вручную в Word. Документ не изменён.')
+            length = len(word.text_of(run))
+            props = run.find('w:rPr', word.NS)
+            for i, (a, b) in enumerate(((0, old_end), (old_end, len(expected)))):
+                if pos < b and pos+length > a:
+                    groups[i].append(props)
+            pos += length
+        def signature(node):
+            return None if node is None else (node.tag, tuple(sorted(node.attrib.items())), node.text, tuple(signature(c) for c in node))
+        if any(len({signature(p) for p in group}) > 1 for group in groups):
+            raise ValueError('Внутри названия смешанное оформление. Обновите эту ссылку вручную в Word; остальные ссылки не изменены.')
+        # A title-only citation cannot acquire a new label without a style decision.
+        if bool(old_end) != bool(new_end):
+            raise ValueError('Изменился вид обозначения. Обновите эту ссылку вручную в Word.')
+        for child in list(link): link.remove(child)
+        for group, value in zip(groups, (replacement[:new_end], replacement[new_end:])):
+            if not value: continue
+            run = E.SubElement(link, f'{{{word.W}}}r')
+            if group and group[0] is not None: run.append(deepcopy(group[0]))
+            E.SubElement(run, f'{{{word.W}}}t', {'{http://www.w3.org/XML/1998/namespace}space':'preserve'}).text = value
+    relation.set('Target', address)
+    return E.tostring(root, encoding='unicode')
