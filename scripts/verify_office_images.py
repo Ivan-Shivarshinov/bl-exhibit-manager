@@ -20,7 +20,7 @@ def verify(output, soffice=None):
     output.mkdir(parents=True,exist_ok=True)
     engine = {'available':True,'engine':'libreoffice','label':'LibreOffice','executable':soffice} if soffice else main_pdf.available()
     assert engine['available'], engine
-    original = fixture()
+    original = fixture(signature=True)
     (output/'Source.docx').write_bytes(original)
     with TemporaryDirectory() as temp, patch.object(main_pdf,'available',return_value=engine):
         store = Store(temp); project = store.create('Illustrated training')
@@ -49,6 +49,7 @@ def verify(output, soffice=None):
                       (im.width//4,3*im.height//4),(3*im.width//4,3*im.height//4)]
             return all(max(abs(a-b) for a,b in zip(im.getpixel(pt),col)) < 20 for pt,col in zip(points,colors))
         assert any(matches(im) for im in images), 'Image colors/orientation changed'
+        assert any(sum(max(abs(a-b) for a,b in zip(pixel, (22,44,99))) < 12 for pixel in im.get_flattened_data()) > 100 for im in images), 'Transparent signature image lost its ink'
         toc_colors = []
         for page in reader.pages:
             state = {'color':(0,0,0)}; stack=[]
@@ -64,7 +65,7 @@ def verify(output, soffice=None):
         (output/'Submission.zip').write_bytes(archive)
         (output/'Main.pdf').write_bytes(data)
         for i in range(len(reader.pages)):(output/f'page-{i+1}.png').write_bytes(pdf.render_png(data,i+1,1.5))
-        result={'engine':engine['label'],'pages':len(reader.pages),'images':len(images),'toc_colors':toc_colors,'targets':sorted(targets),'downloaded_docx_preserved':True}
+        result={'engine':engine['label'],'pages':len(reader.pages),'images':len(images),'signature_image':True,'toc_colors':toc_colors,'targets':sorted(targets),'downloaded_docx_preserved':True}
         (output/'checks.json').write_text(json.dumps(result,indent=2),encoding='utf-8'); print(json.dumps(result))
 
 

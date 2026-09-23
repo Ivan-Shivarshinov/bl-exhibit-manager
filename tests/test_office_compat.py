@@ -9,7 +9,7 @@ from zipfile import ZipFile, ZIP_DEFLATED
 from docx import Document
 from docx.shared import Inches
 from lxml import etree as E
-from PIL import Image
+from PIL import Image, ImageDraw
 
 from exhibit import word, main_pdf, office_compat
 
@@ -57,7 +57,7 @@ def package(parts):
     return out.getvalue()
 
 
-def fixture(emf=None):
+def fixture(emf=None, signature=False):
     doc = Document()
     doc.add_heading('Illustrated training document', 0)
     p = doc.add_paragraph()
@@ -86,6 +86,13 @@ def fixture(emf=None):
     E.SubElement(p._p, f'{{{word.W}}}bookmarkEnd', {f'{{{word.W}}}id':'1'})
     png = BytesIO(); Image.new('RGB', (120,80), 'red').save(png, format='PNG'); png.seek(0)
     doc.add_picture(png, width=Inches(3))
+    if signature:
+        # Invented stroke on a transparent background, never a person's signature.
+        image = Image.new('RGBA', (180, 60), (255, 255, 255, 0))
+        ImageDraw.Draw(image).line([(8, 48), (50, 9), (32, 45), (102, 17), (76, 48), (170, 25)], fill=(22, 44, 99, 255), width=4)
+        signature_png = BytesIO(); image.save(signature_png, format='PNG'); signature_png.seek(0)
+        doc.add_paragraph('Fictional signature image')
+        doc.add_picture(signature_png, width=Inches(1.5))
     p = doc.add_paragraph('Training citation')
     r = E.SubElement(p._p, f'{{{word.W}}}r')
     E.SubElement(r, f'{{{word.W}}}footnoteReference', {f'{{{word.W}}}id':'1'})
