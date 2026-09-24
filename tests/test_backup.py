@@ -105,6 +105,20 @@ class BackupTests(TestCase):
         with self.assertRaisesRegex(ValueError, 'настройки проекта'): backup.restore_archive(target, self.archive)
         self.assertEqual(target.list(), [])
 
+    def test_incomplete_history_and_translation_rejected_with_valid_hashes(self):
+        self.save(); original = self.archive.read_bytes()
+        for kind in ('history', 'translation'):
+            with self.subTest(kind=kind):
+                self.archive.write_bytes(original)
+                def incomplete(parts):
+                    name = next(n for n in parts if n.startswith('exports/') and n.endswith('manifest.json')) if kind == 'history' else f'translation-{self.did}.json'
+                    value = json.loads(parts[name]); value.pop('changes' if kind == 'history' else 'parts')
+                    parts[name] = json.dumps(value).encode()
+                    manifest = json.loads(parts['backup.json']); manifest['files'][name] = backup.hash_stream(BytesIO(parts[name]))
+                    parts['backup.json'] = json.dumps(manifest).encode()
+                self.rewrite(incomplete)
+                with self.assertRaisesRegex(ValueError, 'Неполные'): backup.inspect_archive(self.archive)
+
     def test_bad_paths_duplicates_symlinks_and_unknown_versions(self):
         self.save(); good = self.archive.read_bytes()
         for name in ['../outside', '/absolute', 'C:/outside', 'inputs\\wrong', 'project.json', 'PROJECT.JSON']:

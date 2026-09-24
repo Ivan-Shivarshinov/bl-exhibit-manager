@@ -111,6 +111,13 @@ def check_project(p, files, read):
             if not isinstance(value, dict): fail('Повреждены данные перевода.')
             source_hash = value.get('hash') if name.startswith('translation-source-') else value.get('source_hash')
             if 'inputs/'+str(source_hash)+'.pdf' not in files: fail('Отсутствует исходник сохранённого перевода.')
+            if name.startswith('translation-source-'):
+                if not isinstance(value.get('options'), dict): fail('Повреждена разметка перевода.')
+            elif (not isinstance(value.get('parts'), list) or not isinstance(value.get('target'), str)
+                  or type(value.get('revision')) is not int
+                  or value.get('status') not in ('running', 'partial', 'complete', 'cancelled', 'error', 'interrupted')
+                  or any(not isinstance(part, dict) or not all(isinstance(part.get(k), str) for k in ('source', 'translation')) for part in value['parts'])):
+                fail('Неполные данные черновика перевода.')
         if name.startswith('exports/'):
             histories.add(name.split('/')[1])
     for eid in histories:
@@ -119,6 +126,12 @@ def check_project(p, files, read):
         meta = json_data(read(meta_name))
         if meta.get('id') != eid or any(meta.get(k) != files[zip_name][k] for k in ('size', 'sha256')):
             fail('Сохранённый комплект повреждён.')
+        content, changes = meta.get('manifest'), meta.get('changes')
+        if (not isinstance(meta.get('created_at'), str) or not isinstance(content, dict)
+                or not isinstance(content.get('documents'), list) or not isinstance(changes, dict)
+                or any(not isinstance(changes.get(k), list) or any(not isinstance(v, str) for v in changes[k]) for k in ('added', 'changed', 'removed'))
+                or any(not isinstance(d, dict) or not all(isinstance(d.get(k), str) for k in ('id', 'title', 'identifier')) for d in content['documents'])):
+            fail('Неполные сведения об истории комплектов.')
     return {'documents': len(ids), 'inputs': sum(n.startswith('inputs/') for n in files),
             'translations': sum(n.startswith('translation-') and not n.startswith('translation-source-') for n in files),
             'exports': len(histories), 'files': len(files), 'bytes': sum(v['size'] for v in files.values())}
