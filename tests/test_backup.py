@@ -55,6 +55,16 @@ class BackupTests(TestCase):
         self.assertEqual(Translations(target).state(restored['id'], self.did)['status'], 'partial')
         self.assertEqual(len(target.list()), 1)
 
+    def test_ready_translated_document_needs_no_new_approval(self):
+        from exhibit.project import document_ready
+        self.store.update(self.p,self.did,{'number':1,'designation':'Annex','style':{'font':'DejaVu','size':10,'margin':24,'stamp_mode':'band','top':26}})
+        self.store.approve(self.p,self.did,'translation'); self.store.approve(self.p,self.did,'document')
+        self.assertTrue(document_ready(self.p,self.p['documents'][0]))
+        self.save(); target=Store(self.root/'target'); restored=backup.restore_archive(target,self.archive)
+        self.assertTrue(document_ready(restored,restored['documents'][0]))
+        self.assertTrue(restored['documents'][0]['translation_confirmed'])
+        self.assertEqual(self.store.prepare(self.p,self.p['documents'][0]),target.prepare(restored,restored['documents'][0]))
+
     def test_conflict_requires_explicit_copy_and_keeps_original(self):
         self.save(); before = (self.store.folder(self.p['id'])/'project.json').read_bytes()
         with self.assertRaisesRegex(ValueError, 'уже существует'): backup.restore_archive(self.store, self.archive)
@@ -157,6 +167,45 @@ class BackupTests(TestCase):
         with patch.object(schema, 'CURRENT', 2), patch.dict(schema.UPGRADES, {1:migrate}), patch.object(backup, 'save_archive', side_effect=OSError('full')):
             with self.assertRaisesRegex(ValueError, 'свободное место'): self.store.load(self.p['id'])
         self.assertEqual((self.store.folder(self.p['id'])/'project.json').read_bytes(), before)
+
+    def test_failed_archive_write_removes_partial_file(self):
+        original = backup.hash_stream
+        def full(src, output=None):
+            if output is not None:
+                output.write(b'partial')
+                raise OSError('disk full')
+            return original(src)
+        with patch.object(backup, 'hash_stream', side_effect=full):
+            with self.assertRaisesRegex(ValueError, 'свободное место'): self.save()
+        self.assertFalse(self.archive.exists())
+        self.save()
+
+    def test_snapshot_serializes_concurrent_project_write(self):
+        from threading import Event, Thread
+        from exhibit.project import LOCK
+        started, done = Event(), Event()
+        original = backup.hash_stream
+        writers = []
+        def writer():
+            started.set()
+            with LOCK:
+                changed = self.store.load(self.p['id']); changed['name']='Changed after snapshot'
+                self.store.save(changed)
+            done.set()
+        def observed(src, output=None):
+            if output is not None and not writers:
+                thread = Thread(target=writer); writers.append(thread); thread.start()
+                self.assertTrue(started.wait(2)); self.assertFalse(done.is_set())
+            return original(src, output)
+        with patch.object(backup, 'hash_stream', side_effect=observed): self.save()
+        writers[0].join(5); self.assertTrue(done.is_set())
+        self.assertEqual(backup.inspect_archive(self.archive)['project']['name'],self.p['name'])
+        self.assertEqual(self.store.load(self.p['id'])['name'],'Changed after snapshot')
+
+    def test_input_size_limit_rejected_before_reading_large_input(self):
+        self.save()
+        with patch.object(backup,'MAX_INPUT',1):
+            with self.assertRaisesRegex(ValueError,'50 МБ'): backup.inspect_archive(self.archive)
 
     def test_current_schema_does_not_write(self):
         with patch.object(self.store, 'save', side_effect=AssertionError('unexpected write')):

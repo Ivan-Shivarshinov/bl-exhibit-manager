@@ -24,7 +24,7 @@ OpenSpec 1.8.0, стандартная схема `spec-driven`. Цель про
 
 ## Согласованные следующие изменения
 
-Порядок после v0.2.0: [project-backup-and-restore](changes/project-backup-and-restore/proposal.md) → [self-service-onboarding](changes/self-service-onboarding/proposal.md) → [case-material-library](changes/case-material-library/proposal.md). Пользователь согласовал направления 24 сентября; для каждого созданы proposal, specs, design и tasks. Это план реализации, а не готовые функции. Полная карта — в ROADMAP.
+Порядок после v0.2.0: [project-backup-and-restore](changes/project-backup-and-restore/proposal.md) → [self-service-onboarding](changes/self-service-onboarding/proposal.md) → [case-material-library](changes/case-material-library/proposal.md). Пользователь согласовал направления 24 сентября; для каждого созданы proposal, specs, design и tasks. Этап 1 реализован в ветке `codex/project-backup-and-restore`; 0.3.0 ещё не опубликована. Новые базовые спецификации сохранности и формата отражают эту реализацию, а не возможности выпущенной v0.2.0. Этапы 2–3 пока только спланированы. Полная карта — в ROADMAP.
 
 Подтверждённая пользователем ручная проверка панели учитывается отдельно от автоматизации агента. Коллеги проверяют опубликованные релизы в обычной работе и передают замечания через пользователя. Ожидание формального отчёта не является условием следующего этапа; отсутствие замечаний не превращается в отметку о пройденном тесте. Не переносить подтверждение на неуказанную ОС/версию или неизвестный сценарий.
 

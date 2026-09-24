@@ -21,6 +21,7 @@ FORMAT = 1
 MAX_BYTES = 8_000_000_000
 MAX_FILES = 20_000
 MAX_JSON = 20_000_000
+MAX_INPUT = 50_000_000
 CHUNK = 1024 * 1024
 ID = r'[a-f0-9]{32}'
 BLOB = r'[a-f0-9]{64}\.(?:pdf|docx)'
@@ -130,6 +131,7 @@ def inspect_archive(path):
                 names.add(normal); total += info.file_size
                 if total > MAX_BYTES: fail('Распакованный архив превышает предел 8 ГБ.')
                 if name.endswith('.json') and info.file_size > MAX_JSON: fail('Слишком большой файл настроек проекта.')
+                if name.startswith('inputs/') and info.file_size > MAX_INPUT: fail('Исходный PDF или DOCX превышает предел 50 МБ.')
             if 'backup.json' not in names or 'project.json' not in names: fail('Это не архив проекта Exhibit Manager.')
             manifest = json_data(archive.read('backup.json'))
             if not isinstance(manifest, dict) or (type(manifest.get('format')) is not int or manifest.get('format') != FORMAT) or manifest.get('application') != 'exhibit-manager-project':
@@ -143,7 +145,7 @@ def inspect_archive(path):
             p = json_data(archive.read('project.json'))
             summary = check_project(p, files, archive.read)
             return {'project': p, 'files': files, 'summary': summary, 'created_at': manifest.get('created_at')}
-    except (BadZipFile, EOFError, RuntimeError, NotImplementedError, KeyError, TypeError, AttributeError) as exc:
+    except (BadZipFile, EOFError, RuntimeError, NotImplementedError, KeyError, TypeError, AttributeError, RecursionError) as exc:
         raise ValueError('Архив проекта повреждён или имеет неподдерживаемую структуру.') from exc
 
 
