@@ -91,6 +91,17 @@ def check_project(p, files, read):
     for ref in p['references']:
         if not isinstance(ref, dict) or (ref.get('target') is not None and ref['target'] not in ids): fail('Ссылка указывает на отсутствующий документ.')
         if not {'key', 'target', 'mention', 'footnote'} <= ref.keys(): fail('Неполные данные ссылки.')
+    # Exercise the same metadata projection the UI opens, without filesystem access.
+    # This rejects incomplete nested settings before publishing any restored folder.
+    from .project import Store
+    class MetadataView(Store):
+        def __init__(self): pass
+        def source(self, project, value):
+            source(value)
+            return b''
+    try: MetadataView().public(p)
+    except (KeyError, TypeError, AttributeError, IndexError) as exc:
+        raise ValueError('Неполные или некорректные настройки проекта в архиве.') from exc
     histories = set()
     for name, entry in files.items():
         if name.startswith('inputs/') and name.split('/')[1].split('.')[0] != entry['sha256']:
@@ -150,6 +161,8 @@ def inspect_archive(path):
 
 
 def inventory(folder):
+    if folder.is_symlink() or (hasattr(folder, 'is_junction') and folder.is_junction()):
+        fail('Папка проекта является ссылкой файловой системы.')
     result = []
     for path in folder.rglob('*'):
         name = path.relative_to(folder).as_posix()

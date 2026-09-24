@@ -92,6 +92,19 @@ class BackupTests(TestCase):
         self.rewrite(remove)
         with self.assertRaisesRegex(ValueError, 'обязательный исходник'): backup.inspect_archive(self.archive)
 
+    def test_valid_hashes_do_not_make_incomplete_metadata_restorable(self):
+        self.save()
+        def incomplete(parts):
+            p = json.loads(parts['project.json']); del p['documents'][0]['translation_confirmed']
+            parts['project.json'] = json.dumps(p).encode()
+            manifest = json.loads(parts['backup.json'])
+            manifest['files']['project.json'] = backup.hash_stream(BytesIO(parts['project.json']))
+            parts['backup.json'] = json.dumps(manifest).encode()
+        self.rewrite(incomplete)
+        target = Store(self.root/'target')
+        with self.assertRaisesRegex(ValueError, 'настройки проекта'): backup.restore_archive(target, self.archive)
+        self.assertEqual(target.list(), [])
+
     def test_bad_paths_duplicates_symlinks_and_unknown_versions(self):
         self.save(); good = self.archive.read_bytes()
         for name in ['../outside', '/absolute', 'C:/outside', 'inputs\\wrong', 'project.json', 'PROJECT.JSON']:
