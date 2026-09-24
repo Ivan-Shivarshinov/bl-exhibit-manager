@@ -16,6 +16,18 @@ from reportlab.lib.utils import ImageReader
 
 PDF_LOCK = RLock()  # PDFium must never be called concurrently, even on different PDFs.
 FONT = Path(__file__).parent / "assets" / "DejaVuSans.ttf"
+# Long web captures are valid pages. Bound raster allocations, not paper formats.
+MAX_PAGE_SIZE = 14400
+MAX_PREVIEW_PIXELS = 12_000_000
+MAX_RASTER_EDGE = 16000
+
+
+def raster_scale(width, height, requested, max_pixels=MAX_PREVIEW_PIXELS):
+    if not all(math.isfinite(v) and v > 0 for v in (width, height, requested)):
+        raise ValueError("Некорректный размер страницы или масштаб PDF.")
+    # Leave room for PDFium's upward rounding to whole pixels.
+    return min(requested, (MAX_RASTER_EDGE-1)/width, (MAX_RASTER_EDGE-1)/height,
+               math.sqrt(max_pixels/((width+1)*(height+1))))
 
 
 def init_font():
@@ -37,8 +49,8 @@ def inspect_pdf(data: bytes):
             w, h = float(page.cropbox.width), float(page.cropbox.height)
             if page.rotation % 180:
                 w, h = h, w
-            if not (10 <= w <= 3000 and 10 <= h <= 3000):
-                raise ValueError("Неподдерживаемый размер страницы PDF.")
+            if not (10 <= w <= MAX_PAGE_SIZE and 10 <= h <= MAX_PAGE_SIZE):
+                raise ValueError(f"Размер страницы PDF должен быть от 10 до {MAX_PAGE_SIZE} пунктов по каждой стороне.")
             sizes.append([w, h])
         return {"pages": len(reader.pages), "sizes": sizes,
                 "text_pages": [bool((p.extract_text() or "").strip()) for p in reader.pages]}
@@ -53,7 +65,7 @@ def render_png(data: bytes, page_number: int, scale=1.2):
         if not 1 <= page_number <= len(pdf):
             raise ValueError("Страница вне документа.")
         page = pdf[page_number - 1]
-        bitmap = page.render(scale=scale)
+        bitmap = page.render(scale=raster_scale(*page.get_size(), scale), limit_image_cache=True)
         try:
             result = BytesIO()
             bitmap.to_pil().save(result, format="PNG")
@@ -109,14 +121,21 @@ def check_stamp_space(data, page_number, width, height, left, right, style):
     if left:rectangles.append((margin,top-ascent,margin+pdfmetrics.stringWidth(left,font,size),top-descent))
     if right:rectangles.append((width-margin-pdfmetrics.stringWidth(right,font,size),top-ascent,width-margin,top-descent))
     with PDF_LOCK,pdfium.PdfDocument(data) as pdf:
-        page=pdf[page_number-1];bitmap=page.render(scale=2)
+        page=pdf[page_number-1]
         try:
-            image=bitmap.to_pil().convert('RGB')
             for x0,y0,x1,y1 in rectangles:
-                crop=image.crop((max(0,math.floor((x0-1)*image.width/width)),max(0,math.floor((y0-1)*image.height/height)),min(image.width,math.ceil((x1+1)*image.width/width)),min(image.height,math.ceil((y1+1)*image.height/height))))
-                if sum(min(pixel)<235 for pixel in crop.get_flattened_data())>2:
-                    raise ValueError(f'Штамп пересекает содержимое на странице {page_number}. Измените отступы или выберите дополнительную полосу над страницей.')
-        finally:bitmap.close();page.close()
+                # Render only the label rectangle at full inspection resolution.
+                # A long page must not allocate a full-page 14400x14400 bitmap.
+                pw,ph=page.get_size()
+                x0=max(0,math.floor(x0-1));y0=max(0,math.floor(y0-1))
+                x1=min(width,math.ceil(x1+1));y1=min(height,math.ceil(y1+1))
+                bitmap=page.render(scale=2,crop=(x0*pw/width,(height-y1)*ph/height,(width-x1)*pw/width,y0*ph/height),limit_image_cache=True)
+                try:
+                    image=bitmap.to_pil().convert('RGB')
+                    if sum(min(pixel)<235 for pixel in image.get_flattened_data())>2:
+                        raise ValueError(f'Штамп пересекает содержимое на странице {page_number}. Измените отступы или выберите дополнительную полосу над страницей.')
+                finally:bitmap.close()
+        finally:page.close()
 
 
 def prepare_part(data, selection, left, right, style):
@@ -140,12 +159,12 @@ def prepare_part(data, selection, left, right, style):
             # Render then crop pixels, never crop a PDF page or paint a white mask.
             with PDF_LOCK, pdfium.PdfDocument(data) as pdf:
                 page = pdf[item["page"] - 1]
-                bitmap = page.render(scale=300 / 72)
+                x0, y0, x1, y1 = rect
+                pw,ph=page.get_size()
+                bitmap = page.render(scale=raster_scale(pw*(x1-x0),ph*(y1-y0),300/72,24_000_000),
+                                     crop=(x0*pw,(1-y1)*ph,(1-x1)*pw,y0*ph),limit_image_cache=True)
                 try:
-                    full = bitmap.to_pil()
-                    x0, y0, x1, y1 = rect
-                    image = full.crop((math.ceil(x0 * full.width), math.ceil(y0 * full.height),
-                                       math.floor(x1 * full.width), math.floor(y1 * full.height))).copy()
+                    image = bitmap.to_pil().copy()
                 finally:
                     bitmap.close()
                     page.close()

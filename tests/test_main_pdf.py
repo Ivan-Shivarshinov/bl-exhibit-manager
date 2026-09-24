@@ -4,7 +4,7 @@ from io import BytesIO
 from pathlib import Path
 from unittest.mock import patch, Mock
 import subprocess
-from zipfile import ZipFile
+from zipfile import ZipFile, ZIP_DEFLATED
 from reportlab.pdfgen import canvas
 from pypdf import PdfReader
 from exhibit import main_pdf, word, pdf
@@ -89,7 +89,17 @@ class MainPdf(unittest.TestCase):
         result=self.store.prepare_main_pdf(self.p)
         paths=[a.get_object()['/A'].get('/F',{}).get('/UF') for a in PdfReader(BytesIO(result)).pages[0]['/Annots']]
         self.assertIn('Новая папка с пробелами/RLA-31.pdf',paths)
-        self.store.upload(self.p,'Replaced.docx',files()['Main document.docx'],kind='main')
+        # A new edition must change actual content, not rely on ZIP timestamps.
+        # Identical re-uploads now intentionally preserve the reviewed state.
+        from lxml import etree as E
+        parts=word.package(self.store.source(self.p,self.p['main']))
+        root=word.xml(parts['word/document.xml'])
+        first=root.find('.//w:t',word.NS);first.text=(first.text or '')+' — revised edition'
+        parts['word/document.xml']=E.tostring(root,xml_declaration=True,encoding='UTF-8',standalone=True)
+        changed=BytesIO()
+        with ZipFile(changed,'w',ZIP_DEFLATED) as archive:
+            for name,data in parts.items():archive.writestr(name,data)
+        self.store.upload(self.p,'Replaced.docx',changed.getvalue(),kind='main')
         self.assertFalse(self.store.main_pdf_status(self.p)['ready'])
 
     def test_converter_unavailable_has_actionable_error_without_partial_zip(self):

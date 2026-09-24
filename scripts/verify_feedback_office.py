@@ -93,6 +93,11 @@ def verify(output,engine=None):
     real_popen=main_pdf.popen
     with (output/'office.log').open('w',encoding='utf-8') as log,TemporaryDirectory() as folder,patch.object(main_pdf,'available',return_value=actual):
         store=Store(folder);project=create_review(store)
+        request={'action':'folders','destinations':{d['id']:("Exhibits/Respondent's Evidence" if i%2==0 else 'Exhibits/Legal Authorities') for i,d in enumerate(project['documents'])}}
+        _,report=store.batch_plan(project,request)
+        assert not report['conflicts'],report
+        project=store.batch_apply(project,request,report['token'])
+        assert project['links_reviewed']
         def logged_popen(command,**kwargs):
             log.write(repr(command)+'\n');log.flush()
             kwargs.update(stdout=log,stderr=subprocess.STDOUT)
@@ -123,17 +128,32 @@ def verify(output,engine=None):
     linked=word.package((output/'Submission/Main document.docx').read_bytes())
     root=word.xml(linked[word.FOOT]);managed=[h for h in root.findall('.//w:hyperlink',word.NS) if h.get(f'{{{word.R}}}id')!='rIdWebsite']
     assert [word.text_of(h) for h in managed]==EXPECTED
+    _,source_rows=word.paragraphs(word.package(fixture()))
+    def styles(node):
+        result=[]
+        for run in node.findall('.//w:r',word.NS):
+            def on(name):
+                value=run.find('w:rPr/w:'+name,word.NS)
+                return value is not None and value.get(f'{{{word.W}}}val','1') not in ('0','false','off')
+            result.extend([(on('b'),on('i'))]*len(word.text_of(run)))
+        return result
     for h in managed:
+        title=word.text_of(h)
+        source=next(row[-1] for row in source_rows if title in word.text_of(row[-1]))
+        start=word.text_of(source).index(title)
+        expected=styles(source)[start:start+len(title)]
+        label=word.UNPREFIXED.match(title) or word.IDENT.match(title)
+        if label:
+            expected=[(True if i<label.end() else b,italic) for i,(b,italic) in enumerate(expected)]
+        assert styles(h)==expected,('Source typography changed',title)
         for run in h.findall('w:r',word.NS):
             props=run.find('w:rPr',word.NS)
             assert props.find('w:color',word.NS).attrib=={f'{{{word.W}}}val':'000000'}
             assert props.find('w:u',word.NS).get(f'{{{word.W}}}val')=='none'
-            for name,value in [('b','1'),('bCs','1'),('i','0'),('iCs','0')]:
-                assert props.find('w:'+name,word.NS).get(f'{{{word.W}}}val')==value
     old=word.xml(word.package(fixture())[word.FOOT]).find('.//w:hyperlink',word.NS)
     website=root.xpath('.//w:hyperlink[@r:id="rIdWebsite"]',namespaces=word.NS)[0]
     assert E.tostring(old)==E.tostring(website)
-    data=(output/'Submission/Main document.pdf').read_bytes();reader=PdfReader(BytesIO(data));count=0;targets=set();websites=0;bold_characters=0
+    data=(output/'Submission/Main document.pdf').read_bytes();reader=PdfReader(BytesIO(data));count=0;targets=set();websites=0;bold_characters=0;italic_characters=0;regular_weight_characters=0
     for index,page in enumerate(reader.pages):
         png=pdf.render_png(data,index+1,2);(output/f'Main-page-{index+1}.png').write_bytes(png)
         rendered=Image.open(BytesIO(png)).convert('RGB')
@@ -159,13 +179,14 @@ def verify(output,engine=None):
                     flags=ctypes.c_int();size=pdfium_raw.FPDFText_GetFontInfo(textpage,ci,None,0,ctypes.byref(flags));name=ctypes.create_string_buffer(size)
                     pdfium_raw.FPDFText_GetFontInfo(textpage,ci,name,size,ctypes.byref(flags))
                     weight=pdfium_raw.FPDFText_GetFontWeight(textpage,ci)
-                    assert weight>=600 or b'bold' in name.value.lower(),('Link is not bold',name.value,weight)
-                    assert not flags.value&64 and b'italic' not in name.value.lower(),('Link is italic',name.value)
-                    bold_characters+=1
+                    is_bold=weight>=600 or b'bold' in name.value.lower()
+                    bold_characters+=int(is_bold)
+                    regular_weight_characters+=int(not is_bold)
+                    italic_characters+=int(bool(flags.value&64) or b'italic' in name.value.lower())
             finally:textpage.close();native_page.close()
     assert count>=len(EXPECTED) and len(targets)==len(LABELS) and websites==1,(count,targets,websites)
-    assert bold_characters>100
-    result={'engine':actual['label'],'citations':len(managed),'pdf_link_rectangles':count,'pdf_targets':len(targets),'pages':len(reader.pages),'black_links':True,'bold_upright_pdf_characters':bold_characters,'external_website_preserved':True}
+    assert bold_characters>0 and italic_characters>0 and regular_weight_characters>0
+    result={'engine':actual['label'],'citations':len(managed),'pdf_link_rectangles':count,'pdf_targets':len(targets),'pages':len(reader.pages),'black_links':True,'bold_pdf_characters':bold_characters,'italic_pdf_characters':italic_characters,'regular_weight_pdf_characters':regular_weight_characters,'nested_folders':True,'external_website_preserved':True}
     (output/'checks.json').write_text(json.dumps(result,indent=2),encoding='utf-8')
     print(json.dumps(result))
 

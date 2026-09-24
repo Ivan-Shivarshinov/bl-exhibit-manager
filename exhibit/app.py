@@ -51,6 +51,8 @@ async def local_only(request: Request, call_next):
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["Referrer-Policy"] = "no-referrer"
     response.headers["Content-Security-Policy"] = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' blob: data:; object-src 'none'; frame-ancestors 'none'; connect-src 'self'"
+    if request.url.path.startswith('/word/'):
+        response.headers['Content-Security-Policy'] = "default-src 'self'; script-src 'self' https://appsforoffice.microsoft.com; style-src 'self'; img-src 'self' data:; connect-src 'self' https://appsforoffice.microsoft.com; object-src 'none'; frame-ancestors 'self' https://*.office.com https://*.officeapps.live.com https://*.microsoft365.com"
     return response
 
 
@@ -85,15 +87,88 @@ def get_project(pid: str):
         return store.public(store.load(pid))
 
 
+@app.get('/api/projects/{pid}/exports')
+def exports(pid: str):
+    from .history import list_exports
+    with LOCK: return list_exports(store, store.load(pid))
+
+
+@app.get('/api/projects/{pid}/exports/{eid}')
+def saved_export(pid: str, eid: str):
+    from .history import read_export
+    with LOCK: data = read_export(store, store.load(pid), eid)
+    return Response(data, media_type='application/zip', headers={'Content-Disposition': 'attachment; filename="Submission.zip"'})
+
+
+@app.get('/api/word/projects/{pid}')
+def word_catalog(pid: str):
+    from .word_bridge import catalog
+    with LOCK: return catalog(store.load(pid))
+
+
+@app.get('/api/word/status')
+def word_status():
+    return getattr(app.state, 'word_connection', {'configured': False})
+
+
+@app.post('/api/word/rewrite')
+async def word_rewrite(request: Request):
+    from .word_bridge import rewrite_citation_ooxml
+    data = await request.json()
+    if not isinstance(data, dict): raise ValueError('Некорректный запрос Word.')
+    return {'ooxml': rewrite_citation_ooxml(data.get('ooxml'), data.get('expected'), data.get('replacement'), data.get('address'), data.get('identifier', ''))}
+
+
+@app.get('/api/word/manifest')
+def word_manifest():
+    path = store.root / 'BLExhibitManager.Word.xml'
+    if not path.exists(): raise ValueError('Сначала настройте подключение Word по инструкции.')
+    return FileResponse(path, media_type='application/xml', filename=path.name)
+
+
+@app.get('/api/word/instructions')
+def word_instructions():
+    path = Path(__file__).resolve().parent / 'assets' / 'WORD-SETUP.txt'
+    return Response(path.read_text('utf-8'), media_type='text/plain; charset=utf-8')
+
+
+@app.post('/api/projects/{pid}/citation-style')
+async def citation_style(pid: str, request: Request):
+    from .word_bridge import check_settings
+    values = check_settings(await request.json())
+    with LOCK:
+        p = store.load(pid); p['citation_style'] = values; store.save(p)
+        return store.public(p)
+
+
+@app.get('/api/word/open/{pid}/{did}/{cid}')
+def word_open(pid: str, did: str, cid: str):
+    with LOCK:
+        p = store.load(pid); d = store.document(p, did)
+        data = store.prepare(p, d)
+    return Response(data, media_type='application/pdf')
+
+
 @app.post("/api/projects/{pid}/upload")
-async def upload(pid: str, request: Request, name: str, kind: str = "original", did: str | None = None):
+async def upload(pid: str, request: Request, name: str, kind: str = "original", did: str | None = None, mode: str = "prepare"):
     data = bytearray()
     async for chunk in request.stream():
         data.extend(chunk)
         if len(data) > 50_000_000:
             raise ValueError("Максимальный размер файла — 50 МБ.")
     with LOCK:
-        return store.public(store.upload(store.load(pid), name, bytes(data), kind, did))
+        project = store.load(pid)
+        expected = request.headers.get('X-Exhibit-Main-Sha')
+        if kind == 'main' and expected is not None and expected != (project.get('main') or {}).get('sha256', ''):
+            raise ValueError('Основной DOCX в подаче изменился. Обновите список в панели Word и проверьте выбранную подачу перед повторной передачей.')
+        return store.public(store.upload(project, name, bytes(data), kind, did, mode))
+
+
+@app.post("/api/projects/{pid}/ready-pdfs")
+async def ready_pdfs(pid: str, request: Request):
+    body = await request.json()
+    with LOCK:
+        return store.public(store.use_originals(store.load(pid), body.get("document_ids")))
 
 
 @app.post("/api/projects/{pid}/documents/{did}")
@@ -140,14 +215,22 @@ def scan(pid: str):
 async def map_reference(pid: str, request: Request):
     b = await request.json()
     with LOCK:
-        return store.public(store.map_reference(store.load(pid), b["key"], b["target"], b.get("all_same", False)))
+        return store.public(store.map_reference(store.load(pid), b["key"], b["target"], b.get("all_same", False), b.get("keep_original", False)))
 
 
 @app.post("/api/projects/{pid}/references/add")
 async def add_reference(pid: str, request: Request):
     b = await request.json()
     with LOCK:
-        return store.public(store.add_reference(store.load(pid), b["fid"], b["paragraph"], b["mention"]))
+        return store.public(store.add_reference(store.load(pid), b["fid"], b["paragraph"], b["mention"], b.get('start'), b.get('end'), b.get('target')))
+
+
+@app.post("/api/projects/{pid}/references/exclude")
+async def exclude_reference(pid: str, request: Request):
+    b = await request.json()
+    if type(b.get('restore',False)) is not bool: raise ValueError('Некорректное действие.')
+    with LOCK:
+        return store.public(store.exclude_reference(store.load(pid), b['key'], b.get('restore',False)))
 
 
 @app.post("/api/projects/{pid}/references/confirm")

@@ -21,7 +21,7 @@ NEW_LAYOUT = {'stamp_mode':'overlay','top':26}
 DEFAULT_LABELS = {"designation": "Exhibit", "original_label": "[Original]", "translation_label": "[Translation]"}
 FORMAT_KEYS = set(DEFAULT_STYLE) | set(DEFAULT_LABELS) | set(LEGACY_LAYOUT)
 EDITABLE = {"title", "prefix", "number", "designation", "filename", "folder", "language", "mode",
-            "original_label", "translation_label", "selection", "translation_selection", "aliases", "style", "format_overrides", "filename_mode"}
+            "original_label", "translation_label", "selection", "translation_selection", "aliases", "style", "format_overrides", "filename_mode", "short_title"}
 
 
 def digest(value):
@@ -34,7 +34,7 @@ def identifier(doc, p=None):
 
 
 def review_digest(doc, style):
-    return digest({"doc": {k: v for k, v in doc.items() if k not in ("approved", "identifier", "format_overrides", "filename_mode")}, "style": style})
+    return digest({"doc": {k: v for k, v in doc.items() if k not in ("approved", "identifier", "format_overrides", "filename_mode", "short_title")}, "style": style})
 
 
 def group_key(folder):
@@ -67,6 +67,12 @@ def effective_document(p, doc):
 def revision(p, doc):
     effective, style = effective_document(p, doc)
     return review_digest(effective, style)
+
+
+def document_ready(p, doc):
+    # Choosing an existing, finished PDF does not claim a visual review.
+    # Source integrity, paths and reference targets are validated separately.
+    return doc["mode"] == "passthrough" or doc["approved"] == revision(p, doc)
 
 
 def safe_path(folder, filename):
@@ -157,13 +163,30 @@ class Store:
                 return doc
         raise ValueError("Документ не найден.")
 
-    def upload(self, p, name, data, kind="original", did=None):
+    def upload(self, p, name, data, kind="original", did=None, mode="prepare"):
+        if mode not in ("prepare", "passthrough") or (mode == "passthrough" and (kind != "original" or did)):
+            raise ValueError("Загрузка готового PDF доступна только для нового приложения.")
         source = self.put(p, name, data, "docx" if kind == "main" else "pdf")
         if kind == "main":
+            previous = deepcopy(p)
+            if p.get('main', {}) and p['main']['sha256'] == source['sha256']:
+                p['main'] = source
+                self.save(p)
+                return p
             p["main"] = source
             p["references"], p["footnotes"] = [], []
+            p['excluded_references'] = []
             p["links_reviewed"] = False
             p["scanned"] = False
+            if previous.get('main'):
+                from .revisions import reconcile
+                documents = [{**d, 'identifier': identifier(d, p)} for d in p['documents']]
+                found = word.scan(data, documents, project_id=p['id'])
+                from .word_bridge import annotate
+                annotate(found, p)
+                p['edition_report'] = reconcile(previous, found)
+                p.update(found)
+                p['scanned'] = True
         elif did:
             doc = self.document(p, did)
             if kind not in ("original", "translation"):
@@ -177,7 +200,7 @@ class Store:
         else:
             stem = Path(name).stem
             doc = {"id": uuid4().hex, "title": stem, "prefix": "", "number": None, "designation": "Exhibit",
-                   "filename": Path(name).name, "folder": "", "language": "", "mode": "prepare",
+                   "filename": Path(name).name, "folder": "", "language": "", "mode": mode,
                    "original_label": "[Original]", "translation_label": "[Translation]", "original": source,
                    "translation": None, "translation_confirmed": False, "approved": None, "aliases": [],
                    "selection": [{"page": n+1} for n in range(source["pages"])], "translation_selection": [], "style": None,
@@ -188,6 +211,22 @@ class Store:
         self.save(p)
         return p
 
+    def use_originals(self, p, ids):
+        if not isinstance(ids, list) or not ids or any(not isinstance(x, str) for x in ids) or len(set(ids)) != len(ids):
+            raise ValueError("Выберите документы для использования без обработки.")
+        proposed = deepcopy(p)
+        selected = [self.document(proposed, did) for did in ids]
+        translated = [d for d in selected if d["translation"]]
+        if translated:
+            raise ValueError(f"У документа «{translated[0]['title']}» прикреплён перевод. Открепите перевод или снимите выбор этого документа. Ничего не изменено.")
+        for doc in selected:
+            self.source(proposed, doc["original"])
+            doc["mode"] = "passthrough"
+            # A later return to preparation must require a fresh visual check.
+            doc["approved"] = None
+        self.save(proposed)
+        return proposed
+
     def update(self, p, did, changes, persist=True):
         if not changes.keys() <= EDITABLE:
             raise ValueError("Неизвестные настройки документа.")
@@ -195,6 +234,8 @@ class Store:
         before_identifier = identifier(doc,p)
         before = {k: doc.get(k) for k in ("prefix", "number", "filename", "folder", "title", "aliases")}
         draft = {**doc, **changes}
+        if not isinstance(draft.get('short_title', ''), str) or len(draft.get('short_title', '')) > 250:
+            raise ValueError('Короткое название: не более 250 символов.')
         if draft["mode"] not in ("prepare", "passthrough") or draft["designation"] not in ("Exhibit", "Annex", ""):
             raise ValueError("Некорректный режим или обозначение.")
         if draft["number"] is not None and (type(draft["number"]) is not int or draft["number"] < 1):
@@ -223,6 +264,8 @@ class Store:
         if "style" in changes:
             for key in set(DEFAULT_STYLE) | set(LEGACY_LAYOUT): layer.pop(key, None)
             layer.update(changes["style"] or {})
+        if "mode" in changes and changes["mode"] != doc["mode"]:
+            doc["approved"] = None
         doc.update(changes)
         doc["format_overrides"] = layer
         if "filename" in changes:
@@ -273,7 +316,9 @@ class Store:
             raise ValueError("Сначала загрузите основной DOCX.")
         saved = {r["key"]: r for r in p["references"] if r.get("manual") or r.get('scope_manual')}
         documents = [{**d, "identifier": identifier(d,p)} for d in p["documents"]]
-        found = word.scan(self.source(p, p["main"]), documents, saved)
+        found = word.scan(self.source(p, p["main"]), documents, saved, excluded=p.get('excluded_references', []), project_id=p['id'])
+        from .word_bridge import annotate
+        annotate(found, p)
         # Preserve explicit user-added free-text spans while the source is unchanged.
         keys = {r["key"] for r in found["references"]}
         for r in p["references"]:
@@ -284,32 +329,71 @@ class Store:
         self.save(p)
         return p
 
-    def map_reference(self, p, key, target, all_same=False):
-        self.document(p, target)
+    def map_reference(self, p, key, target, all_same=False, keep_original=False):
+        if type(keep_original) is not bool or (keep_original and target is not None):
+            raise ValueError("Выберите файл либо вариант «Без файла».")
+        if target is not None:
+            self.document(p, target)
         ref = next((r for r in p["references"] if r["key"] == key), None)
         if not ref:
             raise ValueError("Упоминание не найдено.")
         for r in p["references"]:
             if r["key"] == key or (all_same and r["mention"] == ref["mention"]):
-                r.update(target=target, manual=True)
+                r.update(target=target, manual=True, keep_original=keep_original)
         p["links_reviewed"] = False
         self.save(p)
         return p
 
-    def add_reference(self, p, fid, pi, mention):
+    def exclude_reference(self, p, key, restore=False):
+        proposed = deepcopy(p)
+        source = proposed.setdefault('excluded_references', []) if restore else proposed['references']
+        ref = next((r for r in source if r['key']==key), None)
+        if ref is None: raise ValueError('Упоминание не найдено. Обновите список.')
+        source.remove(ref)
+        if restore:
+            para = next(f for f in p['footnotes'] if f['fid']==ref['fid'] and f['paragraph']==ref['paragraph'])
+            peers = [r for r in proposed['references'] if r['fid']==ref['fid'] and r['paragraph']==ref['paragraph']]
+            automatic = deepcopy([*peers,ref])
+            citations.propose(para['text'], automatic)
+            by_key = {r['key']:r for r in automatic}
+            for item in [*peers,ref]:
+                if not item.get('scope_manual'):
+                    item.update({k:by_key[item['key']][k] for k in ('link_start','link_end','link_text','scope_review')})
+            citations.validate(para['text'], [*peers,ref])
+            # Restoring even a now-unrecognized identifier is an explicit choice.
+            ref.update(custom=True, manual=True)
+            proposed['references'].append(ref)
+            proposed['links_reviewed'] = False
+            self.save(proposed)
+        else:
+            proposed.setdefault('excluded_references', []).append(ref)
+            self.scan(proposed)
+        p.update(proposed)
+        return p
+
+    def add_reference(self, p, fid, pi, mention, start=None, end=None, target=None):
         para = next((x for x in p["footnotes"] if x["fid"] == fid and x["paragraph"] == pi), None)
         if not para or not mention.strip():
             raise ValueError("Выберите сноску и точный текст упоминания.")
-        matches = list(re.finditer(re.escape(mention), para["text"]))
+        if target is not None: self.document(p, target)
+        if start is not None or end is not None:
+            if type(start) is not int or type(end) is not int or not 0 <= start < end <= len(para['text']) or para['text'][start:end] != mention:
+                raise ValueError('Выделите точный текст ссылки в сноске.')
+            spans = [(start,end)]
+        else:
+            spans = [m.span() for m in re.finditer(re.escape(mention), para['text'])]
+        matches = spans
         if not matches:
             raise ValueError("Текст не найден в этой сноске.")
         added = 0
-        for m in matches:
-            if any(r["fid"] == fid and r["paragraph"] == pi and citations.bounds(r)[0] < m.end() and citations.bounds(r)[1] > m.start() for r in p["references"]):
+        for a,b in matches:
+            if any(r["fid"] == fid and r["paragraph"] == pi and citations.bounds(r)[0] < b and citations.bounds(r)[1] > a for r in p["references"]):
                 continue
-            p["references"].append({"key": f"{fid}:{pi}:{m.start()}:{m.end()}", "fid": fid,
-                "footnote": para["footnote"], "paragraph": pi, "start": m.start(), "end": m.end(),
-                "mention": mention, "target": None, "candidates": [], "manual": True, "custom": True})
+            p["references"].append({"key": f"{fid}:{pi}:{a}:{b}", "fid": fid,
+                "footnote": para["footnote"], "paragraph": pi, "start": a, "end": b,
+                "mention": mention, "target": target, "candidates": [], "manual": True, "custom": True,
+                "link_start":a, "link_end":b, "link_text":mention, "scope_manual":True})
+            p['excluded_references'] = [r for r in p.get('excluded_references', []) if not (r['fid']==fid and r['paragraph']==pi and a < r['end'] and b > r['start'])]
             added += 1
         if not added:
             raise ValueError("Упоминание уже сопоставляется или пересекается с другим.")
@@ -331,7 +415,7 @@ class Store:
     def confirm_links(self, p):
         if not p.get("scanned"):
             raise ValueError("Запустите сопоставление заново.")
-        if any(not r["target"] for r in p["references"]):
+        if any(not r["target"] and not r.get('keep_original') for r in p["references"]):
             raise ValueError("Остались несопоставленные упоминания.")
         word.add_links(self.source(p, p["main"]), p["references"], {d["id"]: safe_path(d["folder"], d["filename"]) for d in p["documents"]})
         p["links_reviewed"] = True
@@ -342,8 +426,8 @@ class Store:
         issues, ids, paths = [], {}, ({"main document.docx": None, "main document.pdf": None} if p["main"] else {})
         def issue(code, message, doc=None, ref=None):
             issues.append({"code": code, "message": message, "document": doc, "reference": ref, "blocking": True})
-        if not p["documents"]:
-            issue("empty", "Добавьте хотя бы один PDF.")
+        if not p["documents"] and not p["main"]:
+            issue("empty", "Добавьте PDF или основной DOCX.")
         for d in p["documents"]:
             ident = identifier(d,p)
             if d["mode"] == "prepare" and effective_format(p, d)[0]["designation"] and d["number"] is None:
@@ -362,7 +446,7 @@ class Store:
                     self.source(p, d["translation"])
                     if not d["translation_confirmed"]:
                         issue("translation", "Перевод ожидает проверки.", d["id"])
-                if d["approved"] != revision(p, d):
+                if not document_ready(p, d):
                     issue("unreviewed", "Просмотрите результат и подтвердите подготовку.", d["id"])
             except ValueError as exc:
                 issue("source", str(exc), d["id"])
@@ -379,7 +463,7 @@ class Store:
                 issue("links_review", "Перепроверьте сноски и подтвердите сопоставление.")
             doc_ids = {d["id"] for d in p["documents"]}
             for r in p["references"]:
-                if r["target"] not in doc_ids:
+                if not r.get('keep_original') and r["target"] not in doc_ids:
                     issue("unmatched", f"Сноска {r['footnote']}: не сопоставлено «{r['mention']}».", ref=r["key"])
         return issues
 
@@ -392,7 +476,7 @@ class Store:
     def main_pdf_key(self, p):
         data, paths = self.linked_main(p)
         # ZIP entry timestamps are irrelevant to the rendered document.
-        key = digest({"parts": {k: sha256(v).hexdigest() for k, v in word.package(data).items()}, "paths": paths, "version": 2})
+        key = digest({"parts": {k: sha256(v).hexdigest() for k, v in word.package(data).items()}, "paths": paths, "version": main_pdf.CONVERSION_VERSION})
         return key, data, paths
 
     def main_pdf_status(self, p):
@@ -444,13 +528,16 @@ class Store:
             if p["main"]:
                 z.writestr("Submission/Main document.docx", self.linked_main(p)[0])
                 z.writestr("Submission/Main document.pdf", self.prepare_main_pdf(p))
-        return out.getvalue()
+        data = out.getvalue()
+        from .history import save_export
+        save_export(self, p, data)
+        return data
 
     def public(self, p):
         result = deepcopy(p)
         for d in result["documents"]:
             d["identifier"] = identifier(d,p)
-            d["ready"] = d["approved"] == revision(p, d)
+            d["ready"] = document_ready(p, d)
             d["effective_format"], d["format_sources"] = effective_format(p, d)
             d["format_overrides"] = overrides(d)
             d["filename_mode"] = d.get("filename_mode", "manual")

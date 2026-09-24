@@ -1,0 +1,31 @@
+import React, {useEffect, useState} from 'react';
+
+export function EditionReport({report}) {
+  if (!report) return null;
+  const names={preserved:'Связь сохранена',added:'Новое упоминание',review:'Проверьте сопоставление',removed:'Не найдено в новой редакции'};
+  return <section className="edition-report"><h2>Новая редакция Word</h2><p>Сохранено связей: {report.preserved}. Новых: {report.added}. Требуют проверки: {report.review}. Удалено или изменено: {report.removed}.</p><details><summary>Показать изменения</summary><ul>{report.items.map((item,i)=><li key={i}><b>{names[item.status]}</b> · сноска {item.footnote}: {item.text}</li>)}</ul></details><p className="muted">Номера сносок могут меняться между редакциями. Проверьте сопоставления перед сборкой.</p></section>;
+}
+
+export function ExportHistory({pid, revision, api, run, disabled, saveBlob}) {
+  const [entries,setEntries]=useState([]),[error,setError]=useState(''),[loading,setLoading]=useState(true);
+  useEffect(()=>{let live=true;setLoading(true);api(`/projects/${pid}/exports`).then(data=>{if(live){setEntries(data);setError('');}}).catch(e=>{if(live)setError(e.message);}).finally(()=>{if(live)setLoading(false);});return()=>{live=false;};},[pid,revision]);
+  return <section className="export-history"><h2>История комплектов</h2><p className="muted">Каждая успешная сборка сохраняется целиком. Дальнейшие правки проекта не меняют старые ZIP.</p>{loading?<p>Загружаем историю…</p>:null}{error?<p role="alert">{error}</p>:null}{!loading&&!error&&!entries.length?<p>После первой сборки здесь появится сохранённая версия.</p>:null}
+    {entries.map((entry,i)=><article key={entry.id}><h3>{new Date(entry.created_at).toLocaleString('ru-RU')} · {entry.manifest.documents.length} приложений</h3><p>{i===entries.length-1?'Первая сохранённая сборка':`Добавлено: ${entry.changes.added.length}; изменено: ${entry.changes.changed.length}; удалено: ${entry.changes.removed.length}.`}</p><details><summary>Состав и изменения</summary><p>{entry.changes.main_changed?'Основной DOCX изменился. ':''}{entry.changes.references_changed?'Сопоставления изменились.':''}</p>{['added','changed','removed'].map(key=>entry.changes[key].length?<p key={key}>{({added:'Добавлено',changed:'Изменено',removed:'Удалено'})[key]}: {entry.changes[key].join('; ')}</p>:null)}<ul>{entry.manifest.documents.map(d=><li key={d.id}>{d.identifier} · {d.title}</li>)}</ul></details><button disabled={disabled} onClick={()=>run('Скачиваем сохранённый комплект…',async()=>saveBlob(await api(`/projects/${pid}/exports/${entry.id}`,undefined,{blob:true}),`Submission-${entry.created_at.slice(0,10)}-${entry.id.slice(0,6)}.zip`))}>Скачать эту версию</button></article>)}
+  </section>;
+}
+
+export default function WordWorkflow({p, api, mutate, busy, onDirty}) {
+  const [connection,setConnection]=useState(null),[error,setError]=useState('');
+  const [style,setStyle]=useState(()=>({name_form:'full',separator:'; ',locator_separator:', ',...p.citation_style}));
+  useEffect(()=>{setStyle({name_form:'full',separator:'; ',locator_separator:', ',...p.citation_style});onDirty(false);},[p.citation_style]);
+  function change(next) {setStyle(next);onDirty(JSON.stringify(next)!==JSON.stringify({name_form:'full',separator:'; ',locator_separator:', ',...p.citation_style}));}
+  useEffect(()=>{let live=true;api('/word/status').then(value=>{if(live)setConnection(value);}).catch(e=>{if(live)setError(e.message);});return()=>{live=false;};},[]);
+  return <section className="links-page"><h1>Работа в Microsoft Word</h1><p>Панель Word — необязательное дополнение для создания сносок и обновления названий. Можно работать без неё: загрузить готовый DOCX, сопоставить ссылки и собрать комплект в основном приложении.</p>
+    {error?<p role="alert">{error}</p>:null}
+    {connection?.message?<p role="alert">{connection.message}</p>:null}
+    <div className="word-workflow-grid"><section><h2>Подключение</h2>{connection?.configured?<><p className="success-note">Локальное HTTPS-подключение настроено: {connection.origin}</p><a className="button" href="/api/word/manifest">Скачать манифест Word</a><p>Установите манифест в Word по инструкции. В панели выберите подачу «{p.name}».</p></>:<p>Панель требует однократной настройки локального HTTPS-сертификата и установки надстройки в Word. Основное приложение продолжает работать без этой настройки.</p>}
+    <a className="button" href="/api/word/instructions" target="_blank" rel="noopener">Открыть инструкцию подключения</a>
+    <ol><li>В Word поставьте курсор в основной текст и выберите приложение в панели.</li><li>Укажите страницу или параграф и нажмите «Создать сноску в Word».</li><li>После изменения номеров или названий нажмите «Проверить ссылки» и примените выбранные изменения.</li><li>Сохраните Word и передайте DOCX в приложение кнопкой панели. Проверьте сноски и соберите комплект.</li></ol></section>
+    <section><h2>Формат новых сносок</h2><form onSubmit={e=>{e.preventDefault();mutate('/citation-style',style,'Формат новых сносок сохранён.');}}><fieldset disabled={Boolean(busy)}><label className="field">Название по умолчанию<select value={style.name_form} onChange={e=>change({...style,name_form:e.target.value})}><option value="full">Полное</option><option value="short">Короткое (если задано)</option></select></label><label className="field">Между документами<select value={style.separator} onChange={e=>change({...style,separator:e.target.value})}><option value="; ">Точка с запятой</option><option value=". ">Точка</option></select></label><label className="field">Перед страницей или параграфом<select value={style.locator_separator} onChange={e=>change({...style,locator_separator:e.target.value})}><option value=", ">Запятая</option><option value=": ">Двоеточие</option></select></label><button className="primary">Сохранить формат сносок</button><button type="button" onClick={()=>change({name_form:'full',separator:'; ',locator_separator:', ',...p.citation_style})}>Отменить изменения</button></fieldset></form><p className="muted">Короткое название задаётся в настройках каждого приложения. Ранее написанные сноски автоматически не переписываются.</p></section></div>
+  </section>;
+}

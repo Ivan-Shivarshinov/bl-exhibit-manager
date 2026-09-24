@@ -39,6 +39,7 @@ sh Start.command
 ```powershell
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 npm.cmd run build --prefix web
+node --test web/tests/*.test.js
 ```
 
 На macOS замените пути Python и `npm.cmd` на `.venv/bin/python` и `npm`. Тесты используют временные папки и явные имитации моделей, не расходуют подписки. Word/LibreOffice, реальный вход и пользовательские переходы проверяются отдельно.
@@ -52,3 +53,5 @@ npm.cmd run build --prefix web
 На целевой ОС установите `requirements-build.txt` в отдельное Python-окружение, соберите `web/dist`, затем выполните `python scripts/build_bundle.py`. Результат — `release/BLExhibitManager-<версия>-<платформа>.zip` и SHA-256. `python scripts/bundle_smoke.py <путь-к-ZIP>` проверяет распакованную сборку с отдельной папкой данных и без Python/Node в PATH, включая повторный запуск, PDF, экспорт, остановку и перенос приложения без потери проекта.
 
 GitHub Actions выполняет тесты, нативную сборку и эти проверки на Windows, macOS Intel и macOS ARM. Это не заменяет ручную проверку скачанного пакета через защиту ОС, установленных office-программ и подписок на компьютерах участников, а также рабочих материалов. Пакеты включают Python и уведомления зависимостей в `THIRD-PARTY-NOTICES`; сервисы перевода и office-программы не включены.
+
+`python scripts/verify_revisions_office.py` проверяет обычный HTTP-путь без панели: ручные решения, две редакции DOCX, папки и неизменность ZIP с настоящим конвертером. `python scripts/verify_office_images.py` проверяет растровый EMF+, прозрачную искусственную подпись, оглавление и относительные ссылки. Результаты сохраняются только в `output/`.

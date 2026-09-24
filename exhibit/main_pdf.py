@@ -15,11 +15,12 @@ import sys
 from lxml import etree as E
 from pypdf import PdfReader, PdfWriter
 from pypdf.generic import ArrayObject, BooleanObject, DictionaryObject, NameObject, NumberObject, TextStringObject
-from . import word
+from . import word, office_compat
 from .external_process import popen
 
 CONVERSION_LOCK = Lock()
 TIMEOUT = 120
+CONVERSION_VERSION = 3
 
 
 def available():
@@ -136,6 +137,8 @@ def convert_docx(data, paths):
     engine = available()
     if not engine["available"]: raise ValueError(engine["message"])
     marked, markers = marked_docx(data, paths)
+    if engine['engine'] == 'libreoffice':
+        marked = office_compat.prepare_docx(marked)
     with CONVERSION_LOCK, TemporaryDirectory(prefix="bl-exhibit-pdf-") as temp:
         directory = Path(temp)
         source = directory / "Main document.docx"

@@ -33,6 +33,7 @@ jobs:
       - run: python -m pip install -r requirements-build.txt
       - run: npm ci --prefix web
       - run: npm run build --prefix web
+      - run: node --test web/tests/*.test.js
       - run: python -m unittest discover -s tests -q
       - name: Install native LibreOffice on macOS
         if: runner.os == 'macOS'
@@ -40,13 +41,22 @@ jobs:
       - name: Verify real LibreOffice conversion and full citation links
         if: runner.os == 'macOS'
         run: python scripts/verify_feedback_office.py --output output/feedback-office
+      - name: Verify retained web citations and mixed Word runs
+        if: runner.os == 'macOS'
+        run: python scripts/verify_reference_options_office.py --output output/feedback-office/reference-options
+      - name: Verify bitmap images, TOC and relative links in LibreOffice PDF
+        if: runner.os == 'macOS'
+        run: python scripts/verify_office_images.py --output output/feedback-office/images
+      - name: Verify DOCX revisions and immutable history without Word pane
+        if: runner.os == 'macOS'
+        run: python scripts/verify_revisions_office.py --output output/feedback-office/revisions
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always() && runner.os == 'macOS'
         with:
           name: office-review-${{ matrix.target }}
           path: output/feedback-office
       - run: python scripts/build_bundle.py
-      - run: python scripts/bundle_smoke.py release/BLExhibitManager-0.1.2-${{ matrix.target }}.zip
+      - run: python scripts/bundle_smoke.py release/BLExhibitManager-0.2.0-${{ matrix.target }}.zip
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: pilot-${{ matrix.target }}
