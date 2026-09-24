@@ -48,7 +48,7 @@ def main():
                 raise AssertionError(f'{path}: HTTP {exc.code}: '+exc.read().decode(errors='replace')+'\n'+(log.read_text('utf-8',errors='replace')[-16000:] if log.exists() else 'No server log')) from exc
         try:
             command('--no-browser')
-            health=request('/api/health');assert health['version']=='0.2.0'
+            health=request('/api/health');assert health['version']=='0.3.0'
             html=request('/').decode();assert 'root' in html
             for asset in re.findall(r'(?:src|href)="(/assets/[^\"]+)"',html):assert len(request(asset))>100
             assert request('/api/word/status')['configured'] is False
@@ -104,6 +104,34 @@ def main():
             revised=request(f'/api/projects/{rid}/scan',{})
             assert all(r.get('keep_original') for r in revised['references'])
             request(f'/api/projects/{rid}/references/confirm',{})
+            # Save a complete project with history plus an unfinished DOCX workflow.
+            request(f'/api/projects/{pid}/upload?kind=main&name=Main.docx',raw=main)
+            refs=request(f'/api/projects/{pid}/scan',{})['references']
+            for ref in refs:request(f'/api/projects/{pid}/references',{'key':ref['key'],'target':None,'keep_original':True})
+            request(f'/api/projects/{pid}/references/confirm',{})
+            draft={'status':'partial','source_hash':project['documents'][0]['original']['sha256'],'parts':[{'source':'Synthetic text','translation':''}],'target':'English','revision':1}
+            (data/pid/f'translation-{did}.json').write_text(json.dumps(draft),'utf-8')
+            token=request(f'/api/projects/{pid}/backup',{})['token']
+            saved=request(f'/api/backups/{token}/download')
+            target=archive.stem.split('0.3.0-')[-1]
+            outgoing=Path('output/backup-exchange')/target;outgoing.mkdir(parents=True,exist_ok=True)
+            (outgoing/'project.zip').write_bytes(saved)
+            check=request('/api/backups/preview',raw=saved);assert check['conflict'] and check['summary']['exports']==3
+            copied=request(f"/api/backups/{check['token']}/restore",{'copy':True})
+            assert copied['id']!=pid and all(r.get('keep_original') for r in copied['references'])
+            assert request(f"/api/projects/{copied['id']}/exports/{first_export}")==package
+            # Second CI job downloads archives produced on the other native systems.
+            if len(sys.argv)>2:
+                incoming=Path(sys.argv[2])
+                for source_archive in incoming.rglob('project.zip'):
+                    raw=source_archive.read_bytes();check=request('/api/backups/preview',raw=raw)
+                    restored=request(f"/api/backups/{check['token']}/restore",{'copy':check['conflict']})
+                    with ZipFile(BytesIO(raw)) as z:
+                        for name in z.namelist():
+                            if name.startswith(('inputs/','exports/','translation-')):
+                                assert (data/restored['id']/name).read_bytes()==z.read(name),name
+                    assert all(r.get('keep_original') for r in restored['references'])
+                    print('BACKUP_EXCHANGE_OK='+str(source_archive))
             before={str(p.relative_to(data)):p.read_bytes() for p in data.rglob('project.json')};assert before
             command('--stop');time.sleep(.3)
             # Move the application folder as an update/install-path change, retaining external data.

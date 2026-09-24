@@ -11,6 +11,9 @@ from . import pdf
 from .translation import Translations
 from .translation_cli import status as translation_status
 from . import __version__
+from . import backup
+from starlette.concurrency import run_in_threadpool
+import shutil
 
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost"])
@@ -85,6 +88,60 @@ def demo():
 def get_project(pid: str):
     with LOCK:
         return store.public(store.load(pid))
+
+
+@app.post('/api/projects/{pid}/backup')
+def save_project_backup(pid: str):
+    with LOCK:
+        folder = backup.work_folder(store)
+        try:
+            backup.save_archive(store, pid, folder/'download.zip', translations.active)
+        except Exception:
+            shutil.rmtree(folder)
+            raise
+    return {'token': folder.name}
+
+
+@app.get('/api/backups/{token}/download')
+def download_project_backup(token: str, background: BackgroundTasks):
+    folder = backup.work_folder(store, token)
+    path = folder/'download.zip'
+    if not path.is_file(): raise ValueError('Архив для скачивания не найден.')
+    background.add_task(shutil.rmtree, folder, ignore_errors=True)
+    return FileResponse(path, media_type='application/zip', filename='Exhibit-project.zip', background=background)
+
+
+@app.post('/api/backups/preview')
+async def preview_project_backup(request: Request):
+    folder = backup.work_folder(store)
+    try:
+        with backup.io_errors(), (folder/'restore.zip').open('xb') as stream:
+            size = 0
+            async for chunk in request.stream():
+                size += len(chunk)
+                if size > backup.MAX_BYTES: raise ValueError('Архив превышает предел 8 ГБ.')
+                stream.write(chunk)
+        result = await run_in_threadpool(backup.preview, store, folder/'restore.zip')
+        return {**result, 'token': folder.name}
+    except BaseException:
+        shutil.rmtree(folder)
+        raise
+
+
+@app.post('/api/backups/{token}/restore')
+async def restore_project_backup(token: str, request: Request):
+    body = await request.json()
+    if not isinstance(body, dict) or type(body.get('copy', False)) is not bool: raise ValueError('Выберите способ восстановления.')
+    folder = backup.work_folder(store, token)
+    p = await run_in_threadpool(backup.restore_archive, store, folder/'restore.zip', body.get('copy', False))
+    shutil.rmtree(folder)
+    with LOCK: return store.public(store.load(p['id']))
+
+
+@app.post('/api/backups/{token}/cancel')
+def cancel_project_backup(token: str):
+    with LOCK: shutil.rmtree(backup.work_folder(store, token))
+    return {'cancelled': True}
 
 
 @app.get('/api/projects/{pid}/exports')

@@ -18,7 +18,8 @@ export function updatePlan(links, catalog, origin) {
     const meta = parseCitation(link.hyperlink);
     if (!meta) return [];
     const doc = documents.get(meta.document);
-    const status = meta.project !== catalog.id ? 'other_project' : !doc ? 'missing' : link.text !== meta.expected ? 'manual' : doc[meta.form] !== link.text || new URL(link.hyperlink).origin !== origin ? 'update' : 'current';
+    const restored = (catalog.restored_bindings || []).some(b => ['project','document','citation','form','expected'].every(k => b[k] === meta[k]));
+    const status = meta.project !== catalog.id && !restored ? 'other_project' : !doc ? 'missing' : link.text !== meta.expected ? 'manual' : restored || doc[meta.form] !== link.text || new URL(link.hyperlink).origin !== origin ? 'update' : 'current';
     return [{index, old: link.text, next: doc?.[meta.form] || '', address: link.hyperlink, status,
       nextAddress: doc ? citationUrl(origin, catalog.id, doc.id, doc[meta.form], meta.form, meta.citation) : '', footnote: link.footnote}];
   });
