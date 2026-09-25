@@ -87,7 +87,7 @@ def paragraphs(parts):
     return root, rows
 
 
-def scan(data, documents, saved=None, excluded=(), project_id=None):
+def scan(data, documents, saved=None, excluded=(), project_id=None, bindings=()):
     from .word_bridge import paragraph_links
     parts = package(data)
     _, paras = paragraphs(parts)
@@ -107,7 +107,7 @@ def scan(data, documents, saved=None, excluded=(), project_id=None):
         blocked = [(r['start'],r['end']) for r in excluded if r['fid']==fid and r['paragraph']==pi and text[r['start']:r['end']]==r['mention']]
         spans = {(a,b) for a,b in spans if not any(a < y and b > x for x,y in blocked)}
         # Prefer the longer mention when a title contains its identifier.
-        managed = [r for r in paragraph_links(parts, p, project_id) if not any(r['start'] < y and r['end'] > x for x,y in blocked)]
+        managed = [r for r in paragraph_links(parts, p, project_id, bindings) if not any(r['start'] < y and r['end'] > x for x,y in blocked)]
         managed_by_span = {(r['start'], r['end']): r for r in managed}
         chosen = list(managed_by_span)
         chosen += [(r['start'],r['end']) for r in saved.values() if r.get('custom') and r['fid']==fid and r['paragraph']==pi and text[r['start']:r['end']]==r['mention'] and not any(r['start'] < b and r['end'] > a for a,b in chosen)]

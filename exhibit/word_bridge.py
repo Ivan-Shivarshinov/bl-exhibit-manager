@@ -55,7 +55,8 @@ def catalog(project):
                   'short': title(project, d, 'short'), 'ready': document_ready(project, d)}
                  for d in project['documents']]
     result = {'id': project['id'], 'name': project['name'], 'documents': documents, 'style': settings(project),
-              'main_sha': (project.get('main') or {}).get('sha256', '')}
+              'main_sha': (project.get('main') or {}).get('sha256', ''),
+              'restored_bindings': project.get('restored_word_bindings', {}).get((project.get('main') or {}).get('sha256'), [])}
     return {**result, 'version': digest(result)}
 
 
@@ -69,7 +70,7 @@ def annotate(found, project):
                 ref['scope_review'] = True
 
 
-def paragraph_links(parts, paragraph, project_id):
+def paragraph_links(parts, paragraph, project_id, bindings=()):
     from . import word
     if not project_id or word.RELS not in parts:
         return []
@@ -81,7 +82,7 @@ def paragraph_links(parts, paragraph, project_id):
             meta = parse_link(rels.get(child.get(f'{{{word.R}}}id'), ''))
             if meta and text:
                 found.append({'start': position, 'end': position+len(text), 'mention': text,
-                              'managed': meta, 'target': meta['document'] if meta['project'] == project_id else None})
+                              'managed': meta, 'target': meta['document'] if meta['project'] == project_id or meta in bindings else None})
         position += len(text)
     return found
 

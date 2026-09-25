@@ -71,7 +71,37 @@ def verify(output):
                 text = word.text_of(word.xml(linked[word.FOOT]))
                 assert 'https://youtu.be/training?t=12' in text and 'R-999, ordinary text.' in text
             (output/f'Edition-{number}.zip').write_bytes(data)
-        report = {'engine': engine['label'], 'editions': 2, 'old_zip_unchanged': True, 'ready_pdf_unchanged': True, 'decisions_preserved': True, 'relative_docx_pdf_targets': True, 'panel_required': False}
+        # A restored project remains editable and builds a new linked submission.
+        from exhibit.backup import save_archive, restore_archive
+        from exhibit.translation import Translations
+        old_store = app.store
+        old_project = old_store.load(project['id'])
+        Translations(old_store).write(project['id'], did, {'status':'partial','source_hash':old_project['documents'][0]['original']['sha256'],
+            'parts':[{'source':'Synthetic content','translation':''}],'target':'English'})
+        backup_path = output/'project-backup.zip'
+        if backup_path.exists(): backup_path.unlink()
+        save_archive(old_store, project['id'], backup_path)
+        with TemporaryDirectory() as restored_root:
+            app.store = Store(restored_root)
+            restored = restore_archive(app.store, backup_path)
+            assert app.store.source(restored, restored['main']) == old_store.source(old_project, old_project['main'])
+            assert client.get(base+'/exports/'+eid).content == first
+            assert Translations(app.store).state(restored['id'],did)['status']=='partial'
+            project = post(base+'/upload?kind=main&name=Restored.docx', raw=citation_docx(['Another unrelated footnote.']+texts))
+            project = post(base+'/scan')
+            assert any(r.get('keep_original') for r in project['references']) and any(r.get('custom') for r in project['references'])
+            post(base+'/references/confirm')
+            third = post(base+'/export')
+            with ZipFile(BytesIO(third)) as archive:
+                target = 'Exhibits/Second/Annex 1.pdf'
+                assert archive.read('Submission/'+target)==source
+                reader=PdfReader(BytesIO(archive.read('Submission/Main document.pdf')))
+                targets={a.get_object()['/A']['/F']['/UF'] for page in reader.pages for a in page.get('/Annots',[]) if a.get_object().get('/A',{}).get('/S')=='/GoToR'}
+                assert targets=={target}
+            assert client.get(base+'/exports/'+eid).content == first
+            assert len(client.get(base+'/exports').json())==3
+        app.store = old_store
+        report = {'engine': engine['label'], 'editions': 2, 'old_zip_unchanged': True, 'ready_pdf_unchanged': True, 'decisions_preserved': True, 'relative_docx_pdf_targets': True, 'panel_required': False, 'backup_restore_and_new_export': True}
         (output/'checks.json').write_text(json.dumps(report, indent=2), 'utf-8')
         print(json.dumps(report))
 

@@ -21,3 +21,12 @@ test('changed text, order or destination invalidates update plan',()=>{
  const old=[{text:'Old title',hyperlink:address}];assert.equal(verifyPlan(old,structuredClone(old)),true);
  assert.equal(verifyPlan(old,[{...old[0],text:'Edited'}]),false);assert.equal(verifyPlan(old,[]),false);
 });
+
+test('restored copy rebinds only exact known markers after selecting the copy',()=>{
+ const copy={...catalog,id:'e'.repeat(32),restored_bindings:[parseCitation(address)]};
+ const rows=updatePlan([{text:'Old title',hyperlink:address}],copy,origin);
+ assert.equal(rows[0].status,'update');assert.equal(parseCitation(rows[0].nextAddress).project,copy.id);
+ const foreign=citationUrl(origin,pid,did,'Old title','full','f'.repeat(32));
+ assert.equal(updatePlan([{text:'Old title',hyperlink:foreign}],copy,origin)[0].status,'other_project');
+ assert.equal(updatePlan([{text:'Manual edit',hyperlink:address}],copy,origin)[0].status,'manual');
+});

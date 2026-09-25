@@ -104,9 +104,10 @@ class Store:
             p = json.loads((self.folder(pid) / "project.json").read_text("utf-8"))
         except FileNotFoundError as exc:
             raise ValueError("Проект не найден.") from exc
-        if p.get("schema") != 1:
-            raise ValueError("Версия проекта не поддерживается. Файлы не изменены.")
-        return p
+        if not isinstance(p, dict) or p.get('id') != pid:
+            raise ValueError('Идентификатор проекта не соответствует папке. Файлы не изменены.')
+        from .schema import upgrade
+        return upgrade(self, p)
 
     def save(self, p):
         folder = self.folder(p["id"])
@@ -120,7 +121,8 @@ class Store:
 
     def list(self):
         return [{"id": f.parent.name, "name": json.loads(f.read_text("utf-8"))["name"]}
-                for f in sorted(self.root.glob("*/project.json"), key=lambda p: p.stat().st_mtime, reverse=True)]
+                for f in sorted(self.root.glob("*/project.json"), key=lambda p: p.stat().st_mtime, reverse=True)
+                if re.fullmatch(r'[a-f0-9]{32}', f.parent.name)]
 
     def create(self, name):
         if not isinstance(name, str) or not name.strip() or len(name) > 120:
@@ -169,6 +171,13 @@ class Store:
         source = self.put(p, name, data, "docx" if kind == "main" else "pdf")
         if kind == "main":
             previous = deepcopy(p)
+            prior_bindings = p.get('restored_word_bindings', {}).get((p.get('main') or {}).get('sha256'), [])
+            if prior_bindings:
+                from .word_bridge import parse_link
+                parts = word.package(data)
+                present = [parse_link(r.get('Target', '')) for r in word.xml(parts[word.RELS])] if word.RELS in parts else []
+                inherited = [marker for marker in prior_bindings if marker in present]
+                if inherited: p['restored_word_bindings'][source['sha256']] = inherited
             if p.get('main', {}) and p['main']['sha256'] == source['sha256']:
                 p['main'] = source
                 self.save(p)
@@ -181,7 +190,7 @@ class Store:
             if previous.get('main'):
                 from .revisions import reconcile
                 documents = [{**d, 'identifier': identifier(d, p)} for d in p['documents']]
-                found = word.scan(data, documents, project_id=p['id'])
+                found = word.scan(data, documents, project_id=p['id'], bindings=p.get('restored_word_bindings', {}).get(source['sha256'], []))
                 from .word_bridge import annotate
                 annotate(found, p)
                 p['edition_report'] = reconcile(previous, found)
@@ -316,7 +325,7 @@ class Store:
             raise ValueError("Сначала загрузите основной DOCX.")
         saved = {r["key"]: r for r in p["references"] if r.get("manual") or r.get('scope_manual')}
         documents = [{**d, "identifier": identifier(d,p)} for d in p["documents"]]
-        found = word.scan(self.source(p, p["main"]), documents, saved, excluded=p.get('excluded_references', []), project_id=p['id'])
+        found = word.scan(self.source(p, p["main"]), documents, saved, excluded=p.get('excluded_references', []), project_id=p['id'], bindings=p.get('restored_word_bindings', {}).get(p['main']['sha256'], []))
         from .word_bridge import annotate
         annotate(found, p)
         # Preserve explicit user-added free-text spans while the source is unchanged.

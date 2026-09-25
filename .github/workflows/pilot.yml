@@ -56,9 +56,43 @@ jobs:
           name: office-review-${{ matrix.target }}
           path: output/feedback-office
       - run: python scripts/build_bundle.py
-      - run: python scripts/bundle_smoke.py release/BLExhibitManager-0.2.0-${{ matrix.target }}.zip
+      - run: python scripts/bundle_smoke.py release/BLExhibitManager-0.3.0-${{ matrix.target }}.zip
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: pilot-${{ matrix.target }}
           path: release/*
           if-no-files-found: error
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: backup-${{ matrix.target }}
+          path: output/backup-exchange/${{ matrix.target }}/project.zip
+          if-no-files-found: error
+  backup-exchange:
+    needs: native-package
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2022
+            target: windows-x64
+          - os: macos-15-intel
+            target: macos-x64
+          - os: macos-15
+            target: macos-arm64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: pilot-${{ matrix.target }}
+          path: release
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: backup-*
+          path: incoming-backups
+      - run: python scripts/bundle_smoke.py release/BLExhibitManager-0.3.0-${{ matrix.target }}.zip incoming-backups

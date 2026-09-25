@@ -1,5 +1,6 @@
 import {citationUrl, parseCitation, updatePlan, verifyPlan} from './core.js';
 import {citationOoxml} from './citation-ooxml.js';
+import {ooxmlSnapshot} from './ooxml-snapshot.js';
 
 async function editable(context) {
   context.document.load('changeTrackingMode');
@@ -72,6 +73,7 @@ export async function applyUpdates(catalog, plan, indices) {
     if (selected.some(row => row.status !== 'update')) throw new Error('Ручные изменения нельзя перезаписать автоматически.');
     const fragments = selected.map(row => ranges[row.index].getOoxml());
     await context.sync();
+    const snapshots = fragments.map(xml => ooxmlSnapshot(xml.value));
     // Prepare every replacement before changing any range: preserve source typography
     // or reject the whole operation if a title has ambiguous mixed formatting.
     const prepared = await Promise.all(selected.map(async (row, i) => {
@@ -87,7 +89,7 @@ export async function applyUpdates(catalog, plan, indices) {
     // Formatting may also change while the request is in flight.
     const freshXml = selected.map(row => fresh.ranges[row.index].getOoxml());
     await context.sync();
-    if (freshXml.some((xml, i) => xml.value !== fragments[i].value)) throw new Error('Оформление Word изменилось. Повторите проверку ссылок.');
+    if (freshXml.some((xml, i) => ooxmlSnapshot(xml.value) !== snapshots[i])) throw new Error('Оформление Word изменилось. Повторите проверку ссылок.');
     await editable(context);
     for (const {row, ooxml} of prepared.reverse()) {
       fresh.ranges[row.index].insertOoxml(ooxml, 'Replace');
