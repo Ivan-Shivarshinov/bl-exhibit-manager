@@ -55,10 +55,7 @@ jobs:
           if-no-files-found: error
       - name: Install native LibreOffice on macOS
         if: runner.os == 'macOS'
-        run: |
-          # Hosted Intel images can retain a cask pointing to a retired download.
-          brew update
-          brew install --cask libreoffice
+        run: bash scripts/install_ci_libreoffice.sh
       - name: Verify real LibreOffice conversion and full citation links
         if: runner.os == 'macOS'
         run: python scripts/verify_feedback_office.py --output output/feedback-office
