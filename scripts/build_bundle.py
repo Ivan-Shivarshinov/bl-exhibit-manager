@@ -41,6 +41,13 @@ def main():
     os.chdir(ROOT)
     system={'win32':'windows','darwin':'macos'}.get(sys.platform)
     if not system:raise SystemExit('Build on Windows or macOS.')
+    if system=='macos':
+        # A dynamically linked cryptography may work in the build environment but
+        # bind to Python's incompatible libssl.3 after freezing the application.
+        from cryptography.hazmat.bindings import _rust
+        linked=subprocess.check_output(['otool','-L',_rust.__file__],text=True)
+        if any('libssl.' in line or 'libcrypto.' in line for line in linked.splitlines()[1:]):
+            raise SystemExit('cryptography must use static OpenSSL. Reinstall with OPENSSL_STATIC=1 and --no-cache-dir; see docs/DEVELOPMENT.md.')
     arch='arm64' if platform.machine().lower() in ('arm64','aarch64') else 'x64'
     target=f'{system}-{arch}';build=ROOT/'build'/target;dist=ROOT/'dist'/target
     # All replaceable build output stays within this repository's known build directories.

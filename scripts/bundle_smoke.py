@@ -6,6 +6,7 @@ import os
 import re
 import shutil
 import socket
+import ssl
 import subprocess
 import sys
 import tempfile
@@ -48,12 +49,34 @@ def main():
                 raise AssertionError(f'{path}: HTTP {exc.code}: '+exc.read().decode(errors='replace')+'\n'+(log.read_text('utf-8',errors='replace')[-16000:] if log.exists() else 'No server log')) from exc
         try:
             command('--no-browser')
-            health=request('/api/health');assert health['version']=='0.3.0'
+            health=request('/api/health');assert health['version']=='0.4.0'
             html=request('/').decode();assert 'root' in html
             for asset in re.findall(r'(?:src|href)="(/assets/[^\"]+)"',html):assert len(request(asset))>100
             assert request('/api/word/status')['configured'] is False
             assert b'office.js' in request('/word/index.html')
             assert b'applyUpdates' in request('/word/office.js')
+            summary=request('/api/setup')
+            assert summary['components']['word']['state']=='not_configured'
+            assert summary['components']['claude']['state']=='unchecked'
+            for provider in ('claude','codex'):
+                assert request('/api/setup/check/'+provider,{})['state']=='missing'
+            with socket.socket() as sock:sock.bind(('127.0.0.1',0));tls_port=sock.getsockname()[1]
+            connected=request('/api/setup/word',{'port':tls_port})
+            assert connected['state']=='running',connected
+            assert request('/api/setup/check/word',{})['state']=='needs_trust'
+            certificate=request('/api/setup/word/certificate')
+            assert b'BEGIN CERTIFICATE' in certificate and b'PRIVATE KEY' not in certificate
+            context=ssl.create_default_context(cadata=certificate.decode())
+            with urlopen(f'https://localhost:{tls_port}/api/health',context=context,timeout=5) as response:
+                assert json.load(response)['version']=='0.4.0'
+            configured=(data/'word-connection.json').read_bytes()
+            command('--stop');command('--no-browser')
+            assert (data/'word-connection.json').read_bytes()==configured
+            assert request('/api/setup/word',{})['fingerprint']==connected['fingerprint']
+            with urlopen(f'https://localhost:{tls_port}/api/health',context=context,timeout=5) as response:
+                assert json.load(response)['status']=='ok'
+            summary=request('/api/setup/report',{'word':{'state':'running','key':'PRIVATE'},'secret':{'state':'available'}})
+            assert 'PRIVATE' not in json.dumps(summary) and 'secret' not in summary['components']
             command('--no-browser') # Repeated start keeps the existing process/data.
             demo=request('/api/demo',{})
             doc=demo['documents'][0];pid=demo['id'];did=doc['id']
@@ -113,7 +136,7 @@ def main():
             (data/pid/f'translation-{did}.json').write_text(json.dumps(draft),'utf-8')
             token=request(f'/api/projects/{pid}/backup',{})['token']
             saved=request(f'/api/backups/{token}/download')
-            target=archive.stem.split('0.3.0-')[-1]
+            target=archive.stem.split('0.4.0-')[-1]
             outgoing=Path('output/backup-exchange')/target;outgoing.mkdir(parents=True,exist_ok=True)
             (outgoing/'project.zip').write_bytes(saved)
             check=request('/api/backups/preview',raw=saved);assert check['conflict'] and check['summary']['exports']==3

@@ -30,14 +30,32 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '22'
-      - run: python -m pip install -r requirements-build.txt
+      - name: Install build dependencies with static OpenSSL
+        # Intel macOS builds cryptography from source. Keep its OpenSSL separate
+        # from Python's libssl.3, which PyInstaller also bundles.
+        env:
+          OPENSSL_STATIC: '1'
+        run: python -m pip install --no-cache-dir -r requirements-build.txt
       - run: npm ci --prefix web
       - run: npm run build --prefix web
       - run: node --test web/tests/*.test.js
       - run: python -m unittest discover -s tests -q
+      - run: python scripts/build_bundle.py
+      - run: python scripts/bundle_smoke.py release/BLExhibitManager-0.4.0-${{ matrix.target }}.zip
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: pilot-${{ matrix.target }}
+          path: release/*
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: backup-${{ matrix.target }}
+          path: output/backup-exchange/${{ matrix.target }}/project.zip
+          if-no-files-found: error
       - name: Install native LibreOffice on macOS
         if: runner.os == 'macOS'
-        run: brew install --cask libreoffice
+        run: bash scripts/install_ci_libreoffice.sh
       - name: Verify real LibreOffice conversion and full citation links
         if: runner.os == 'macOS'
         run: python scripts/verify_feedback_office.py --output output/feedback-office
@@ -55,21 +73,11 @@ jobs:
         with:
           name: office-review-${{ matrix.target }}
           path: output/feedback-office
-      - run: python scripts/build_bundle.py
-      - run: python scripts/bundle_smoke.py release/BLExhibitManager-0.3.0-${{ matrix.target }}.zip
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: pilot-${{ matrix.target }}
-          path: release/*
-          if-no-files-found: error
-
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: backup-${{ matrix.target }}
-          path: output/backup-exchange/${{ matrix.target }}/project.zip
-          if-no-files-found: error
   backup-exchange:
     needs: native-package
+    # Exercise uploaded packages even if a later external Office check fails.
+    # Missing/failed native builds still fail the artifact download; no check is waived.
+    if: ${{ always() && !cancelled() }}
     strategy:
       fail-fast: false
       matrix:
@@ -95,4 +103,4 @@ jobs:
         with:
           pattern: backup-*
           path: incoming-backups
-      - run: python scripts/bundle_smoke.py release/BLExhibitManager-0.3.0-${{ matrix.target }}.zip incoming-backups
+      - run: python scripts/bundle_smoke.py release/BLExhibitManager-0.4.0-${{ matrix.target }}.zip incoming-backups

@@ -152,11 +152,11 @@ def status(provider):
             else:
                 data = json.loads(stdout)
                 ready = code == 0 and data.get("loggedIn") and data.get("authMethod") in ("claude.ai", "oauth_token") and data.get("apiProvider") == "firstParty"
-        return {"provider": provider, "ready": bool(ready), "version": version.strip()[:100],
+        return {"provider": provider, "ready": bool(ready), "state": "available" if ready else "needs_login", "version": version.strip()[:100],
                 "message": "Вход в аккаунт найден. Эта проверка не обращается к модели. Доступ к переводу проверяется отдельным пробным переводом." if ready else "Выполните вход через личную подписку в официальном CLI.",
                 "login": "codex login" if provider == "codex" else "claude auth login"}
     except (ValueError, OSError, json.JSONDecodeError, subprocess.SubprocessError):
-        return {"provider": provider, "ready": False, "message": "CLI отсутствует, устарел или вход через подписку не подтверждён. Установите актуальный CLI и войдите.",
+        return {"provider": provider, "ready": False, "state": "error", "message": "CLI отсутствует, устарел или вход через подписку не подтверждён. Установите актуальный CLI и войдите.",
                 "login": "codex login" if provider == "codex" else "claude auth login"}
 
 

@@ -40,3 +40,14 @@
 .folder-tree-scroll{max-height:330px;overflow:auto;border:1px solid #dce3eb;border-radius:6px;padding:0 12px;margin-bottom:12px}.folder-documents{max-height:390px;overflow:auto;border:1px solid #dce3eb;border-radius:6px;margin:12px 0}.folder-document{display:flex;align-items:flex-start;gap:8px;padding:12px;border-bottom:1px solid #edf0f4;cursor:pointer}.folder-document input{flex-shrink:0}.folder-document span{min-width:0;overflow-wrap:anywhere}.folder-document small{display:block;margin-top:5px;color:#667489}.folder-report{margin-top:20px}.folder-report li{margin:8px 0;overflow-wrap:anywhere}
 @media(max-width:750px){.folders-layout{grid-template-columns:1fr}.folders-modal{padding:16px}.folder-tree-scroll{max-height:230px}.folder-documents{max-height:260px}}
 :root .word-workflow-grid{display:grid;grid-template-columns:1fr 1fr;gap:32px;margin-top:24px}.word-workflow-grid ol{padding-left:22px}.word-workflow-grid li{margin:12px 0}.edition-report{padding:18px;border:1px solid #b7d4d5;background:#f0f8f7;border-radius:8px;margin:18px 0}.edition-report li{margin:8px 0;overflow-wrap:anywhere}.export-history{margin-top:36px;padding-top:24px;border-top:1px solid #dbe2ea}.export-history article{padding:18px 0;border-bottom:1px solid #dbe2ea}.export-history h3{font-size:16px}.export-history li{overflow-wrap:anywhere}@media(max-width:800px){:root .word-workflow-grid{grid-template-columns:1fr}}
+.setup-dialog{width:min(1040px,calc(100vw - 32px));max-height:calc(100vh - 40px);overflow:auto;border:1px solid #ccd7df;border-radius:12px;padding:28px;color:#182639;background:#fff}
+.setup-dialog::backdrop{background:#18263980}
+.setup-heading{display:flex;align-items:center;justify-content:space-between;gap:20px;flex-wrap:wrap}
+.setup-heading h1{margin:0}.setup-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:16px}
+.setup-card{border:1px solid #d3dde5;padding:20px;border-radius:8px;margin:20px 0;min-width:0}
+.setup-card h2{font-size:20px;margin-top:0}.setup-card p,.setup-steps li{line-height:1.6}
+.setup-card .field input[type=number]{max-width:160px}.setup-card textarea{font-family:monospace;white-space:pre;min-height:200px}
+.setup-steps{padding-left:24px}.setup-steps li{margin:20px 0}.fingerprint{overflow-wrap:anywhere}
+.start-steps{max-width:680px;text-align:left;line-height:1.8;margin:28px auto}
+@media(max-width:800px){.setup-grid{grid-template-columns:1fr}.setup-dialog{padding:18px}.setup-card{margin:8px 0}.project-switch{flex-wrap:wrap}.setup-steps{padding-left:20px}}
+.setup-card .button,.setup-card button{margin:6px 8px 6px 0}
