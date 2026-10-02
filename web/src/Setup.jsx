@@ -12,6 +12,7 @@ export function WordSetup({api}) {
   return <section className="setup-card"><h2>Панель Word · по желанию</h2><p>Для создания сносок прямо в Microsoft Word. Загрузка DOCX, подготовка PDF и сборка комплекта работают без панели.</p>
     {error&&<p role="alert" className="error-note">{error}</p>}
     <p role="status">{busy?'Подготавливаем подключение…':status?.message||'Проверяем настройки…'}</p>
+    {status?.state==='error'&&<button disabled={busy} onClick={()=>action('/setup/check/word')}>Повторить проверку настроек Word</button>}
     {status?.state==='not_configured'&&<><p>Приложение создаст сертификат только для этого компьютера. Доверие к нему вы подтвердите отдельно в настройках системы.</p><label className="field">HTTPS-порт<input type="number" min="1024" max="65535" value={port} onChange={e=>setPort(e.target.value)}/></label><button className="primary" disabled={busy||!port} onClick={()=>action('/setup/word',{port:Number(port)})}>Подготовить подключение Word</button></>}
     {status?.origin&&<>
       <ol className="setup-steps"><li><b>Подключение на этом компьютере.</b> <a href={status.origin+'/word/index.html'} target="_blank" rel="noopener">Открыть адрес панели</a>. Не обходите предупреждение о сертификате; сначала выполните следующий шаг.

@@ -8,7 +8,6 @@ import socket
 import ssl
 import tempfile
 import threading
-from urllib.request import urlopen
 from urllib.error import URLError
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
@@ -128,7 +127,8 @@ def status(root, app, verify=False):
               'generated': config.get('generated') is True,
               'fingerprint': cert.fingerprint(hashes.SHA256()).hex().upper(),
               'expires': cert.not_valid_after_utc.date().isoformat()}
-    if getattr(app.state, 'word_connection', {}).get('configured'):
+    listener = getattr(app.state, 'word_listener', None)
+    if getattr(app.state, 'word_connection', {}).get('configured') and listener and listener[1].is_alive():
         result.update(state='running', message='HTTPS запущен. Проверьте доверие сертификату и подключите панель в Word.')
     if verify:
         try:

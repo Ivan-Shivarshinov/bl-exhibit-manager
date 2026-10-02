@@ -50,3 +50,4 @@
 .setup-steps{padding-left:24px}.setup-steps li{margin:20px 0}.fingerprint{overflow-wrap:anywhere}
 .start-steps{max-width:680px;text-align:left;line-height:1.8;margin:28px auto}
 @media(max-width:800px){.setup-grid{grid-template-columns:1fr}.setup-dialog{padding:18px}.setup-card{margin:8px 0}.project-switch{flex-wrap:wrap}.setup-steps{padding-left:20px}}
+.setup-card .button,.setup-card button{margin:6px 8px 6px 0}
