@@ -37,7 +37,10 @@ jobs:
       - run: python -m unittest discover -s tests -q
       - name: Install native LibreOffice on macOS
         if: runner.os == 'macOS'
-        run: brew install --cask libreoffice
+        run: |
+          # Hosted Intel images can retain a cask pointing to a retired download.
+          brew update
+          brew install --cask libreoffice
       - name: Verify real LibreOffice conversion and full citation links
         if: runner.os == 'macOS'
         run: python scripts/verify_feedback_office.py --output output/feedback-office
