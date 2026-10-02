@@ -78,6 +78,9 @@ jobs:
           path: output/feedback-office
   backup-exchange:
     needs: native-package
+    # Exercise uploaded packages even if a later external Office check fails.
+    # Missing/failed native builds still fail the artifact download; no check is waived.
+    if: ${{ always() && !cancelled() }}
     strategy:
       fail-fast: false
       matrix:
