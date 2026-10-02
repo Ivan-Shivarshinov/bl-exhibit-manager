@@ -40,6 +40,19 @@ jobs:
       - run: npm run build --prefix web
       - run: node --test web/tests/*.test.js
       - run: python -m unittest discover -s tests -q
+      - run: python scripts/build_bundle.py
+      - run: python scripts/bundle_smoke.py release/BLExhibitManager-0.4.0-${{ matrix.target }}.zip
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: pilot-${{ matrix.target }}
+          path: release/*
+          if-no-files-found: error
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: backup-${{ matrix.target }}
+          path: output/backup-exchange/${{ matrix.target }}/project.zip
+          if-no-files-found: error
       - name: Install native LibreOffice on macOS
         if: runner.os == 'macOS'
         run: |
@@ -63,19 +76,6 @@ jobs:
         with:
           name: office-review-${{ matrix.target }}
           path: output/feedback-office
-      - run: python scripts/build_bundle.py
-      - run: python scripts/bundle_smoke.py release/BLExhibitManager-0.4.0-${{ matrix.target }}.zip
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: pilot-${{ matrix.target }}
-          path: release/*
-          if-no-files-found: error
-
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: backup-${{ matrix.target }}
-          path: output/backup-exchange/${{ matrix.target }}/project.zip
-          if-no-files-found: error
   backup-exchange:
     needs: native-package
     strategy:
