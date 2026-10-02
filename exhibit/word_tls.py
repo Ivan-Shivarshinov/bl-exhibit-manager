@@ -11,7 +11,9 @@ def start_optional(app, root, http_port):
     """A broken add-in setup must not prevent ordinary document preparation."""
     app.state.word_connection = {'configured': False}
     try:
-        return start(app, root, http_port)
+        listener = start(app, root, http_port)
+        app.state.word_listener = listener
+        return listener
     except (ValueError, OSError, KeyError, TypeError):
         logging.getLogger(__name__).warning('Optional Word connection is unavailable', exc_info=True)
         app.state.word_connection = {

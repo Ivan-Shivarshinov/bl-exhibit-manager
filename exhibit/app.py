@@ -403,6 +403,56 @@ def translation_preview(pid: str, did: str, revision: int, page: int = 1):
     return Response(pdf.render_png(data, page), media_type="image/png", headers={"X-Page-Count": str(pdf.inspect_pdf(data)["pages"])})
 
 
+@app.get('/api/setup')
+def setup_summary():
+    from . import diagnostics, word_setup
+    components = {'converter': diagnostics.converter(), 'word': word_setup.status(store.root, app),
+                  'claude': {'state': 'unchecked'}, 'codex': {'state': 'unchecked'}}
+    return {'components': components, 'report': diagnostics.report(components)}
+
+
+@app.post('/api/setup/check/{component}')
+def setup_check(component: str):
+    from . import diagnostics, word_setup
+    if component == 'converter': return diagnostics.converter()
+    if component == 'word': return word_setup.status(store.root, app, verify=True)
+    return diagnostics.provider(component)
+
+
+@app.post('/api/setup/report')
+async def setup_report(request: Request):
+    from .diagnostics import report
+    body = await request.json()
+    if not isinstance(body, dict) or any(not isinstance(v, dict) for v in body.values()):
+        raise ValueError('Некорректная сводка.')
+    return report(body)
+
+
+@app.post('/api/setup/word')
+async def setup_word(request: Request):
+    from . import word_setup, word_tls
+    body = await request.json()
+    if not isinstance(body, dict): raise ValueError('Укажите HTTPS-порт.')
+    def prepare():
+        with word_setup.SETUP_LOCK:
+            http_port = getattr(app.state, 'http_port', 8765)
+            word_setup.prepare(store.root, http_port, body.get('port', 8769))
+            listener = getattr(app.state, 'word_listener', None)
+            if not listener or not listener[1].is_alive():
+                word_tls.start_optional(app, store.root, http_port)
+            return word_setup.status(store.root, app)
+    return await run_in_threadpool(prepare)
+
+
+@app.get('/api/setup/word/certificate')
+def setup_certificate():
+    from .word_setup import configuration
+    config, _ = configuration(store.root, getattr(app.state, 'http_port', 8765))
+    if config.get('generated') is not True:
+        raise ValueError('Для прежнего сертификата используйте инструкцию его поставщика.')
+    return FileResponse(config['cert'], media_type='application/x-x509-ca-cert', filename='BL-Exhibit-localhost.crt')
+
+
 DIST = Path(__file__).resolve().parent.parent / "web" / "dist"
 if DIST.exists():
     app.mount("/", StaticFiles(directory=DIST, html=True), name="ui")

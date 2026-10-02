@@ -44,15 +44,19 @@ def serve(port):
                         format="%(asctime)s %(name)s %(levelname)s %(message)s")
     server=uvicorn.Server(uvicorn.Config(app,host="127.0.0.1",port=port,access_log=False,log_level="warning",log_config=None))
     from .word_tls import start_optional as start_word
+    app.state.http_port = port
     word_server = start_word(app, ROOT, port)
+    app.state.word_listener = word_server
     def stop_servers():
         server.should_exit = True
-        if word_server: word_server[0].should_exit = True
+        listener = app.state.word_listener
+        if listener: listener[0].should_exit = True
     app.state.stop_server = stop_servers
     try: server.run()
     finally:
         stop_servers()
-        if word_server: word_server[1].join(timeout=5)
+        listener = app.state.word_listener
+        if listener: listener[1].join(timeout=5)
 
 
 def stop(port):
