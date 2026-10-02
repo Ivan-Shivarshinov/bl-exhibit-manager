@@ -30,7 +30,12 @@ jobs:
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '22'
-      - run: python -m pip install -r requirements-build.txt
+      - name: Install build dependencies with static OpenSSL
+        # Intel macOS builds cryptography from source. Keep its OpenSSL separate
+        # from Python's libssl.3, which PyInstaller also bundles.
+        env:
+          OPENSSL_STATIC: '1'
+        run: python -m pip install --no-cache-dir -r requirements-build.txt
       - run: npm ci --prefix web
       - run: npm run build --prefix web
       - run: node --test web/tests/*.test.js
