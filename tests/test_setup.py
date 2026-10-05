@@ -93,7 +93,7 @@ class SetupTests(TestCase):
                                   side_effect=lambda store: [entry] if store == 'CA' else []) as stores:
                     value = word_setup.status(self.root, self.app, True)
                     self.assertEqual(value['state'], 'needs_trust')
-                    self.assertIn('Доверенные корневые', value['message'])
+                    self.assertIn('Повторите настройку', value['message'])
                     stores.assert_called_once_with('ROOT')
                 with patch.object(ssl, 'enum_certificates', create=True, return_value=[entry]):
                     self.assertEqual(word_setup.status(self.root, self.app, True)['state'], 'trusted')

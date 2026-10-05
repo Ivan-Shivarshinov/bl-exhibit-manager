@@ -85,6 +85,8 @@ class WordInstallTests(TestCase):
         self.assertEqual(original, {p:p.read_bytes() for p in original})
         restarted = Installer(self.root, self.app, self.settings)
         self.assertTrue(restarted.status()['installed'])
+        self.app.state.word_https_check = {}
+        self.assertEqual(word_setup.status(self.root, self.app)['state'], 'trusted')
         self.assertEqual(self.finish(remove=True)['phase'], 'removed')
         self.assertFalse(self.settings.has_trust); self.assertFalse(self.settings.has_registration)
         self.assertEqual(original, {p:p.read_bytes() for p in original})

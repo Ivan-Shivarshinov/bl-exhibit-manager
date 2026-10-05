@@ -185,7 +185,8 @@ class NativeSettings:
 
     def install_trust(self, cert_path, cancel):
         if self.platform == 'win32':
-            self.run([str(Path(os.environ['SYSTEMROOT']) / 'System32/certutil.exe'), '-user', '-addstore', 'Root', str(cert_path)], cancel)
+            scope = [] if self.admin_trust else ['-user']
+            self.run([str(Path(os.environ['SYSTEMROOT']) / 'System32/certutil.exe'), *scope, '-addstore', 'Root', str(cert_path)], cancel)
         else:
             args = ['/usr/bin/security', 'add-trusted-cert', '-r', 'trustRoot', '-p', 'ssl', '-s', 'localhost', '-k', str(self.keychain), str(cert_path)]
             if self.admin_trust: args = ['/usr/bin/sudo', '-n', *args[:2], '-d', *args[2:]]
@@ -196,7 +197,8 @@ class NativeSettings:
         if self.platform == 'win32':
             certificate = word_setup.x509.load_pem_x509_certificate(cert_path.read_bytes())
             fingerprint = certificate.fingerprint(word_setup.hashes.SHA1()).hex()
-            self.run([str(Path(os.environ['SYSTEMROOT']) / 'System32/certutil.exe'), '-user', '-delstore', 'Root', fingerprint])
+            scope = [] if self.admin_trust else ['-user']
+            self.run([str(Path(os.environ['SYSTEMROOT']) / 'System32/certutil.exe'), *scope, '-delstore', 'Root', fingerprint])
         else:
             args = ['/usr/bin/security', 'remove-trusted-cert', str(cert_path)]
             if self.admin_trust: args = ['/usr/bin/sudo', '-n', *args[:2], '-d', *args[2:]]

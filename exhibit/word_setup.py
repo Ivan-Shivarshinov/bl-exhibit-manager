@@ -151,9 +151,14 @@ def trust_context():
 
 
 def status(root, app, verify=False):
-    result = _status(root, app, verify)
     from .word_install import manager
-    result['installation'] = manager(app, root).status()
+    installation = manager(app, root).status()
+    checked = getattr(app.state, 'word_https_check', {})
+    # Saved installations recheck local HTTPS on reopening, and periodically.
+    # This only reads system trust; consent remains in the installer.
+    automatic = installation.get('installed') and time.monotonic() - checked.get('at', 0) >= 60
+    result = _status(root, app, verify or automatic)
+    result['installation'] = installation
     return result
 
 
@@ -164,7 +169,7 @@ def _status(root, app, verify=False):
         config, cert = configuration(root, getattr(app.state, 'http_port', 8765))
     except ValueError:
         return {'state': 'error', 'message': ERROR}
-    result = {'state': 'stopped', 'message': 'Настройки сохранены. Нажмите «Запустить подключение».',
+    result = {'state': 'stopped', 'message': 'Настройки сохранены, соединение остановлено. Повторите настройку панели.',
               'origin': f"https://localhost:{config['port']}", 'port': config['port'],
               'generated': config.get('generated') is True,
               'fingerprint': cert.fingerprint(hashes.SHA256()).hex().upper(),
@@ -174,7 +179,7 @@ def _status(root, app, verify=False):
     panels = getattr(app.state, 'word_panels', None)
     result['panel'] = panels.status() if running and panels else {'state': 'unavailable', 'message': 'Запустите соединение панели с приложением.'}
     if running:
-        result.update(state='running', message='HTTPS запущен. Проверьте доверие сертификату и подключите панель в Word.')
+        result.update(state='running', message='HTTPS запущен. Его доверие и связь с Word проверяются отдельно.')
         checked = getattr(app.state, 'word_https_check', {})
         if checked.get('fingerprint') == result['fingerprint'] and time.monotonic() - checked.get('at', 0) < 60:
             result.update(state=checked['state'], message=checked['message'])
@@ -194,8 +199,8 @@ def _status(root, app, verify=False):
             with opener.open(result['origin'] + '/api/health', timeout=3) as response:
                 health = json.loads(response.read(4096))
             if health.get('application') != 'bl-exhibit-manager': raise ValueError('Wrong listener')
-            result.update(state='trusted', message='Проверка HTTPS в приложении пройдена. Теперь откройте адрес панели в браузере: предупреждения о сертификате быть не должно. Подключение в Word проверяется отдельно.')
+            result.update(state='trusted', message='Защищённое соединение проверено через системное доверие. Связь с панелью внутри Word показана отдельно.')
         except (OSError, URLError, ValueError):
-            result.update(state='needs_trust', message='Проверка HTTPS не пройдена. Убедитесь, что подключение запущено и сертификату установлено доверие. В Windows выберите «Текущий пользователь» → «Доверенные корневые центры сертификации», а не «Промежуточные центры сертификации». На Mac настройте доверие SSL в «Связке ключей» и проверьте адрес панели в Safari. Затем повторите проверку.')
+            result.update(state='needs_trust', message='Защищённое соединение не подтверждено. Повторите настройку панели и подтвердите запрос системы, если он появится. При ограничении организации можно продолжить работу без панели.')
         app.state.word_https_check = {'fingerprint': result['fingerprint'], 'state': result['state'], 'message': result['message'], 'at': time.monotonic()}
     return result
