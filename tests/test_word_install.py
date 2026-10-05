@@ -42,6 +42,7 @@ class Settings:
     def remove_trust(self, cert): self.calls.append('untrust'); self.has_trust = False
     def open_word(self, path):
         self.calls.append('open'); assert Document(path).paragraphs
+        if self.failure == 'cancel_open': raise Cancelled()
         if self.failure == 'open': raise OSError('Simulated failed launch')
 
 
@@ -140,6 +141,13 @@ class WordInstallTests(TestCase):
         self.assertEqual(self.finish()['phase'], 'error')
         self.assertEqual(self.settings.calls, [])
 
+    def test_cancellation_at_final_step_rolls_back_a_new_installation(self):
+        self.settings.failure = 'cancel_open'
+        self.assertEqual(self.finish()['phase'], 'cancelled')
+        self.assertFalse(self.installer.status()['installed'])
+        self.assertFalse(self.settings.has_trust)
+        self.assertFalse(self.settings.has_registration)
+
     def test_starter_documents_are_new_valid_docx_with_visible_registered_panel(self):
         first = starter_document(self.root); first.write_bytes(first.read_bytes()+b'USER_EDIT')
         before = first.read_bytes(); second = starter_document(self.root)
@@ -187,3 +195,12 @@ class WordInstallTests(TestCase):
                 if supported: self.assertEqual(settings.check_word(), app)
                 else:
                     with self.assertRaises(ValueError): settings.check_word()
+
+    def test_mac_removal_disables_only_own_localhost_ssl_trust(self):
+        settings = NativeSettings(platform='darwin', home=self.root)
+        cert = self.root/'Synthetic.crt'
+        with patch.object(settings, 'trusted', side_effect=[True,False]), patch.object(settings, 'run') as run:
+            settings.remove_trust(cert)
+            self.assertEqual(run.call_args.args[0], ['/usr/bin/security','add-trusted-cert','-r','deny','-p','ssl','-s','localhost','-k',str(settings.keychain),str(cert)])
+        with patch.object(settings, 'trusted', return_value=True), patch.object(settings, 'run'):
+            with self.assertRaises(ValueError): settings.remove_trust(cert)

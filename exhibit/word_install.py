@@ -200,10 +200,14 @@ class NativeSettings:
             scope = [] if self.admin_trust else ['-user']
             self.run([str(Path(os.environ['SYSTEMROOT']) / 'System32/certutil.exe'), *scope, '-delstore', 'Root', fingerprint])
         else:
-            args = ['/usr/bin/security', 'remove-trusted-cert', str(cert_path)]
+            # Remove this certificate's SSL trust, retaining our reusable item.
+            # RemoveTrustSettings can hang on current macOS. Replace only our
+            # own SSL/localhost rule; never alter authorizationdb or other certs.
+            args = ['/usr/bin/security', 'add-trusted-cert', '-r', 'deny', '-p', 'ssl', '-s', 'localhost', '-k', str(self.keychain), str(cert_path)]
             if self.admin_trust: args = ['/usr/bin/sudo', '-n', *args[:2], '-d', *args[2:]]
             self.run(args)
-            # Keep the certificate/key file and Keychain item: only installed trust is removed.
+        if self.trusted(cert_path):
+            raise ValueError('Система ещё доверяет сертификату приложения. Повторите удаление подключения и подтвердите системный запрос.')
 
     def open_word(self, path):
         word = self.check_word()
@@ -316,7 +320,7 @@ class Installer:
             self._phase('waiting_word', 'Настройка выполнена. Дождитесь панели в Word и подтвердите её запуск, если Word попросит. Статус обновится автоматически.')
         except (Cancelled, ValueError, OSError) as exc:
             rollback_error = False
-            if record and not record.get('installed'):
+            if record and (not record.get('installed') or isinstance(exc, Cancelled)):
                 if not added_registration: record['registration_owned'] = bool(previous.get('registration_owned'))
                 if not added_trust: record['trust_owned'] = bool(previous.get('trust_owned'))
                 for added, function, argument, field in (
@@ -325,6 +329,9 @@ class Installer:
                     if added:
                         try: function(argument); record[field] = False
                         except (OSError, ValueError): rollback_error = True
+                if isinstance(exc, Cancelled):
+                    record['installed'] = bool(previous.get('installed'))
+                    if not record['installed']: self.app.state.word_panels.clear()
                 try: self._save(record)
                 except OSError: rollback_error = True
             message = 'Настройка отменена. Можно повторить подключение или продолжить работу без панели.' if isinstance(exc, Cancelled) else str(exc) if isinstance(exc, ValueError) else 'Не удалось выполнить настройку. Проверьте доступ к данным приложения и повторите подключение.'
