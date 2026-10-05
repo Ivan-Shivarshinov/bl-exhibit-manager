@@ -66,7 +66,7 @@ GitHub Actions выполняет тесты, нативную сборку и �
 
 `word_install.py` повторяет регистрацию официального [office-addin-dev-settings](https://github.com/OfficeDev/Office-Addin-Scripts/tree/master/packages/office-addin-dev-settings): HKCU `Software\Microsoft\Office\16.0\WEF\Developer` с GUID панели на Windows, собственный файл в `wef` на Mac. Отладчик, SMB, политики организации и закрытие Word не используются. На Windows доверие добавляется в ROOT текущего пользователя; на Mac — в SSL/localhost политику пользовательской Связки ключей. Маркер владения хранит отпечаток и собственные объекты; конфликт не перезаписывается. Откат и удаление сохраняют чужие настройки, проекты и исходные файлы.
 
-Для открытия создаётся каждый раз новый искусственный DOCX с taskpane/webextension, по модели [sideload Microsoft](https://github.com/OfficeDev/Office-Addin-Scripts/blob/master/packages/office-addin-debugging/src/sideload.ts). Присутствие подтверждается отдельным Office.js вызовом Word и ограниченными по времени сессиями; открытие страницы в браузере не объявляет подключение.
+Для открытия создаётся каждый раз новый искусственный DOCX с taskpane/webextension, по модели [sideload Microsoft](https://github.com/OfficeDev/Office-Addin-Scripts/blob/master/packages/office-addin-dev-settings/src/sideload.ts). Присутствие подтверждается отдельным Office.js вызовом Word и ограниченными по времени сессиями; открытие страницы в браузере не объявляет подключение.
 
 Для разработчика со своим сертификатом сохранён способ `python scripts/configure_word.py --cert <certificate> --key <private-key> --port 8769 --data-dir <isolated-data>`. Команда не устанавливает доверие ОС. Не запускайте её против чужого профиля. После настройки перезапустите локальное приложение.
 

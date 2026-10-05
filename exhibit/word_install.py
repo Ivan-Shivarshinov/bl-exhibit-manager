@@ -334,7 +334,7 @@ class Installer:
     def _remove(self):
         try:
             self._check_cancel()
-            self._phase('removing', 'Удаляем только созданное приложением подключение…')
+            self._phase('removing', 'Удаляем только созданное приложением подключение… Подтвердите запрос системы, если он появился.')
             record = self._record()
             if record:
                 config, cert = word_setup.configuration(self.root, getattr(self.app.state, 'http_port', 8765))

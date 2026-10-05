@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import sys
+import subprocess
 import time
 from tempfile import TemporaryDirectory
 import uuid
@@ -41,7 +42,13 @@ def main():
         settings = SimulatedWord(home=root/'home', registry=registration,
                                  keychain=Path('/Library/Keychains/System.keychain'), admin_trust=True)
         settings.home.mkdir()
+        authorization = None
         if sys.platform == 'darwin':
+            # Disposable runner only: preserve/restore the exact admin rule.
+            # remove-trusted-cert otherwise awaits an invisible GUI prompt:
+            # https://github.com/actions/runner-images/issues/12116
+            _, authorization = settings.run(['/usr/bin/sudo','-n','/usr/bin/security','authorizationdb','read','com.apple.trust-settings.admin'])
+            settings.run(['/usr/bin/sudo','-n','/usr/bin/security','authorizationdb','write','com.apple.trust-settings.admin','allow'])
             foreign = settings._mac_target().parent / 'unrelated.xml'
             foreign.parent.mkdir(parents=True, exist_ok=True); foreign.write_bytes(b'Unrelated synthetic add-in')
         else:
@@ -97,9 +104,12 @@ def main():
                 _, cert = word_setup.configuration(data)
                 fingerprint = cert.fingerprint(word_setup.hashes.SHA1()).hex()
                 settings.run(['/usr/bin/sudo','-n','/usr/bin/security','delete-certificate','-Z',fingerprint,str(settings.keychain)])
-            else:
+            elif sys.platform == 'win32':
                 with winreg.OpenKey(winreg.HKEY_CURRENT_USER, registration, 0, winreg.KEY_SET_VALUE) as key: winreg.DeleteValue(key,'Unrelated')
                 winreg.DeleteKey(winreg.HKEY_CURRENT_USER, registration)
+            if authorization is not None:
+                subprocess.run(['/usr/bin/sudo','-n','/usr/bin/security','authorizationdb','write','com.apple.trust-settings.admin'],
+                               input=authorization, capture_output=True, timeout=10, check=True)
 
 
 if __name__=='__main__': main()
