@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import socket
 import ssl
+import sys
 import tempfile
 import threading
 from urllib.error import URLError
@@ -115,6 +116,22 @@ def prepare(root, http_port, port=8769):
             raise ValueError('Не удалось сохранить настройку Word. Проверьте доступ к папке данных и свободное место.')
 
 
+def trust_context():
+    if sys.platform != 'win32':
+        return ssl.create_default_context()
+    # Python's default Windows context imports both ROOT and CA as trust
+    # anchors. That can trust our self-signed certificate in Intermediate CAs
+    # even though Windows browsers reject it. Only ROOT can anchor this check.
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    for cert, encoding, trust in ssl.enum_certificates('ROOT'):
+        if encoding == 'x509_asn' and (trust is True or ssl.Purpose.SERVER_AUTH.oid in trust):
+            try:
+                context.load_verify_locations(cadata=cert)
+            except ssl.SSLError:
+                continue  # Ignore malformed unrelated roots, never bypass verification.
+    return context
+
+
 def status(root, app, verify=False):
     if not (root / 'word-connection.json').exists():
         return {'state': 'not_configured', 'message': 'Панель Word не подключена. Она необязательна.'}
@@ -133,13 +150,13 @@ def status(root, app, verify=False):
     if verify:
         try:
             # Direct loopback only, never system proxy or untrusted remote URL.
-            context = ssl.create_default_context()
+            context = trust_context()
             from urllib.request import build_opener, ProxyHandler, HTTPSHandler
             opener = build_opener(ProxyHandler({}), HTTPSHandler(context=context))
             with opener.open(result['origin'] + '/api/health', timeout=3) as response:
                 health = json.loads(response.read(4096))
             if health.get('application') != 'bl-exhibit-manager': raise ValueError('Wrong listener')
-            result.update(state='trusted', message='HTTPS доступен, runtime доверяет сертификату. Теперь откройте панель в Word.')
+            result.update(state='trusted', message='Проверка HTTPS в приложении пройдена. Теперь откройте адрес панели в браузере: предупреждения о сертификате быть не должно. Подключение в Word проверяется отдельно.')
         except (OSError, URLError, ValueError):
-            result.update(state='needs_trust', message='Доверенное HTTPS-соединение не подтверждено. Проверьте системное доверие сертификату и запуск подключения. На Mac дополнительно откройте адрес панели в Safari.')
+            result.update(state='needs_trust', message='Проверка HTTPS не пройдена. Убедитесь, что подключение запущено и сертификату установлено доверие. В Windows выберите «Текущий пользователь» → «Доверенные корневые центры сертификации», а не «Промежуточные центры сертификации». На Mac настройте доверие SSL в «Связке ключей» и проверьте адрес панели в Safari. Затем повторите проверку.')
     return result

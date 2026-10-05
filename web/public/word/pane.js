@@ -82,8 +82,12 @@ $('send').onclick=()=>run(async()=>{
   catalog=await api('/word/projects/'+catalog.id);
   $('status').textContent='Редакция передана. Откройте подачу, проверьте сопоставления и соберите комплект.';
 });
-if(!globalThis.Office) { $('status').textContent='Панель открывается как надстройка в Microsoft Word. Настройте подключение по инструкции проекта.'; }
+function outsideWord() {
+  $('status').textContent='Страница панели открыта в браузере. Чтобы создавать сноски, подключите скачанный манифест в Microsoft Word по инструкции «Помощь и настройка» и откройте панель внутри Word.';
+}
+if(!globalThis.Office) { outsideWord(); }
 else Office.onReady(info=>{
-  if(info.host!==Office.HostType.Word || !Office.context.requirements.isSetSupported('WordApi','1.5')){ $('status').textContent='Нужен Microsoft Word с поддержкой WordApi 1.5. Обновите Microsoft 365.';return; }
+  if(info.host!==Office.HostType.Word){ outsideWord();return; }
+  if(!Office.context.requirements.isSetSupported('WordApi','1.5')){ $('status').textContent='Нужен Microsoft Word с поддержкой WordApi 1.5. Обновите Microsoft 365.';return; }
   $('workspace').hidden=false;$('status').textContent='Подключено к Word. Выберите подачу.';run(refresh);
 });

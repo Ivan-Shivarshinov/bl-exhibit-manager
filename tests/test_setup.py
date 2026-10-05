@@ -56,12 +56,43 @@ class SetupTests(TestCase):
             self.assertEqual(word_setup.status(self.root, self.app, True)['state'], 'needs_trust')
             config, _ = word_setup.configuration(self.root)
             context = ssl.create_default_context(cafile=config['cert'])
-            with patch.object(word_setup.ssl, 'create_default_context', return_value=context):
+            with patch.object(word_setup, 'trust_context', return_value=context):
                 self.assertEqual(word_setup.status(self.root, self.app, True)['state'], 'trusted')
         finally:
             listener[0].should_exit = True
             listener[1].join(5)
         self.assertFalse(listener[1].is_alive())
+
+    def test_windows_intermediate_store_is_not_a_trust_anchor(self):
+        @self.app.get('/api/health')
+        def health(): return {'application': 'bl-exhibit-manager'}
+        word_setup.prepare(self.root, 8765, self.port)
+        _, cert = word_setup.configuration(self.root)
+        entry = (cert.public_bytes(word_setup.serialization.Encoding.DER), 'x509_asn', True)
+        listener = word_tls.start_optional(self.app, self.root, 8765)
+        try:
+            with patch.object(word_setup.sys, 'platform', 'win32'):
+                # Reproduce automatic installation into Intermediate CAs: Python's
+                # default context trusted this, whereas Windows browsers did not.
+                with patch.object(ssl, 'enum_certificates', create=True,
+                                  side_effect=lambda store: [entry] if store == 'CA' else []) as stores:
+                    value = word_setup.status(self.root, self.app, True)
+                    self.assertEqual(value['state'], 'needs_trust')
+                    self.assertIn('Доверенные корневые', value['message'])
+                    stores.assert_called_once_with('ROOT')
+                with patch.object(ssl, 'enum_certificates', create=True, return_value=[entry]):
+                    self.assertEqual(word_setup.status(self.root, self.app, True)['state'], 'trusted')
+                with patch.object(ssl, 'enum_certificates', create=True,
+                                  return_value=[(entry[0], entry[1], {'1.3.6.1.5.5.7.3.4'})]):
+                    self.assertEqual(word_setup.status(self.root, self.app, True)['state'], 'needs_trust')
+        finally:
+            listener[0].should_exit = True
+            listener[1].join(5)
+
+    def test_non_windows_uses_existing_tls_trust(self):
+        with patch.object(word_setup.sys, 'platform', 'darwin'), patch.object(ssl, 'create_default_context') as create:
+            self.assertIs(word_setup.trust_context(), create.return_value)
+            create.assert_called_once_with()
 
     def test_summary_does_not_invoke_cli_or_mutate_files(self):
         with patch.object(store, 'root', self.root), patch.object(diagnostics.translation_cli, 'status') as cli:
