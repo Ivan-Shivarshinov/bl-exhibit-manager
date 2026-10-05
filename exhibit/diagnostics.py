@@ -28,8 +28,17 @@ def provider(name):
 def report(components):
     system = platform.system()
     arch = platform.machine().lower()
-    return {'application': 'bl-exhibit-manager', 'version': __version__,
+    result = {'application': 'bl-exhibit-manager', 'version': __version__,
             'platform': system if system in ('Windows', 'Darwin', 'Linux') else 'Other',
             'architecture': arch if arch in ('amd64', 'x86_64', 'arm64', 'aarch64') else 'Other',
             'components': {name: {'state': value.get('state') if isinstance(value.get('state'), str) and value.get('state') in STATES else 'error'}
                            for name, value in components.items() if name in ('converter', 'word', 'claude', 'codex')}}
+    panel = components.get('word', {}).get('panel')
+    if isinstance(panel, dict):
+        panel_state = panel.get('state')
+        result['components']['word']['panel_state'] = panel_state if panel_state in ('connected', 'unsupported', 'disconnected', 'waiting', 'unavailable') else 'unavailable'
+    installation = components.get('word', {}).get('installation')
+    if isinstance(installation, dict):
+        phase = installation.get('phase')
+        result['components']['word']['installation_state'] = phase if phase in ('not_installed','preparing','system_confirmation','registering','opening_word','waiting_word','cancelling','cancelled','error','removing','removed') else 'error'
+    return result

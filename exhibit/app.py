@@ -16,6 +16,8 @@ from starlette.concurrency import run_in_threadpool
 import shutil
 
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
+from .word_connection import WordPanels
+app.state.word_panels = WordPanels()
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost"])
 store = Store()
 translations = Translations(store)
@@ -166,6 +168,14 @@ def word_catalog(pid: str):
 @app.get('/api/word/status')
 def word_status():
     return getattr(app.state, 'word_connection', {'configured': False})
+
+
+@app.post('/api/word/connection')
+async def word_panel_connection(request: Request):
+    connection = getattr(app.state, 'word_connection', {})
+    if request.url.scheme != 'https' or not connection.get('configured') or str(request.base_url).rstrip('/') != connection.get('origin'):
+        return JSONResponse({'detail': 'Подтверждение панели доступно только через её локальное HTTPS-соединение.'}, status_code=403)
+    return app.state.word_panels.update(await request.json())
 
 
 @app.post('/api/word/rewrite')
@@ -436,12 +446,49 @@ async def setup_word(request: Request):
     def prepare():
         with word_setup.SETUP_LOCK:
             http_port = getattr(app.state, 'http_port', 8765)
-            word_setup.prepare(store.root, http_port, body.get('port', 8769))
+            word_setup.prepare(store.root, http_port, body.get('port'))
             listener = getattr(app.state, 'word_listener', None)
             if not listener or not listener[1].is_alive():
                 word_tls.start_optional(app, store.root, http_port)
             return word_setup.status(store.root, app)
     return await run_in_threadpool(prepare)
+
+
+@app.post('/api/setup/word/install')
+async def install_word(request: Request):
+    from .word_install import manager
+    from .word_setup import status
+    body = await request.json()
+    if not isinstance(body, dict) or set(body) != {'consent'} or body['consent'] is not True:
+        raise ValueError('Подтвердите настройку локального сертификата, регистрацию панели и открытие учебного Word.')
+    manager(app, store.root).begin()
+    return await run_in_threadpool(status, store.root, app)
+
+
+@app.post('/api/setup/word/cancel')
+def cancel_word():
+    from .word_install import manager
+    from .word_setup import status
+    manager(app, store.root).stop()
+    return status(store.root, app)
+
+
+@app.post('/api/setup/word/remove')
+async def remove_word(request: Request):
+    from .word_install import manager
+    from .word_setup import status
+    body = await request.json()
+    if not isinstance(body, dict) or set(body) != {'consent'} or body['consent'] is not True: raise ValueError('Подтвердите удаление собственного подключения панели.')
+    manager(app, store.root).begin(remove=True)
+    return await run_in_threadpool(status, store.root, app)
+
+
+@app.post('/api/setup/word/open')
+async def open_word():
+    from .word_install import manager
+    from .word_setup import status
+    await run_in_threadpool(manager(app, store.root).open)
+    return status(store.root, app)
 
 
 @app.get('/api/setup/word/certificate')

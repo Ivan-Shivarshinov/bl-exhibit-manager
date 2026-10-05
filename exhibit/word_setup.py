@@ -9,6 +9,7 @@ import ssl
 import sys
 import tempfile
 import threading
+import time
 from urllib.error import URLError
 from cryptography import x509
 from cryptography.hazmat.primitives import hashes, serialization
@@ -74,19 +75,36 @@ def configure(root, cert, key, port):
     return root / 'BLExhibitManager.Word.xml'
 
 
-def prepare(root, http_port, port=8769):
+def prepare(root, http_port, port=None):
     with SETUP_LOCK:
         root.mkdir(parents=True, exist_ok=True)
         if (root / 'word-connection.json').exists():
             config, _ = configuration(root, http_port)
             if not (root / 'BLExhibitManager.Word.xml').exists(): manifest(root, config['port'])
             return
+        automatic = port is None
+        if automatic:
+            port = 8769
         if type(port) is not int or not 1024 <= port <= 65535 or port == http_port:
-            raise ValueError('Укажите свободный HTTPS-порт от 1024 до 65535, отличный от порта приложения.')
+            if automatic:
+                port = 0
+            else:
+                raise ValueError('Укажите свободный HTTPS-порт от 1024 до 65535, отличный от порта приложения.')
         try:
-            with socket.socket() as probe: probe.bind(('127.0.0.1', port))
+            with socket.socket() as probe:
+                try:
+                    probe.bind(('127.0.0.1', port))
+                except OSError:
+                    if not automatic:
+                        raise
+                    probe.bind(('127.0.0.1', 0))
+                port = probe.getsockname()[1]
         except OSError as exc:
-            raise ValueError('HTTPS-порт занят. Выберите другой порт и повторите подготовку.') from exc
+            if not automatic:
+                raise ValueError('HTTPS-порт занят. Выберите другой порт и повторите подготовку.') from exc
+            raise ValueError('Не удалось выбрать HTTPS-порт. Закройте другие экземпляры приложения и повторите подготовку.') from exc
+        if not 1024 <= port <= 65535 or port == http_port:
+            raise ValueError('Укажите свободный HTTPS-порт от 1024 до 65535, отличный от порта приложения.')
         key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
         name = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, 'BL Exhibit Manager localhost')])
         now = datetime.now(timezone.utc)
@@ -133,6 +151,13 @@ def trust_context():
 
 
 def status(root, app, verify=False):
+    result = _status(root, app, verify)
+    from .word_install import manager
+    result['installation'] = manager(app, root).status()
+    return result
+
+
+def _status(root, app, verify=False):
     if not (root / 'word-connection.json').exists():
         return {'state': 'not_configured', 'message': 'Панель Word не подключена. Она необязательна.'}
     try:
@@ -145,12 +170,25 @@ def status(root, app, verify=False):
               'fingerprint': cert.fingerprint(hashes.SHA256()).hex().upper(),
               'expires': cert.not_valid_after_utc.date().isoformat()}
     listener = getattr(app.state, 'word_listener', None)
-    if getattr(app.state, 'word_connection', {}).get('configured') and listener and listener[1].is_alive():
+    running = bool(getattr(app.state, 'word_connection', {}).get('configured') and listener and listener[1].is_alive())
+    panels = getattr(app.state, 'word_panels', None)
+    result['panel'] = panels.status() if running and panels else {'state': 'unavailable', 'message': 'Запустите соединение панели с приложением.'}
+    if running:
         result.update(state='running', message='HTTPS запущен. Проверьте доверие сертификату и подключите панель в Word.')
+        checked = getattr(app.state, 'word_https_check', {})
+        if checked.get('fingerprint') == result['fingerprint'] and time.monotonic() - checked.get('at', 0) < 60:
+            result.update(state=checked['state'], message=checked['message'])
     if verify:
         try:
             # Direct loopback only, never system proxy or untrusted remote URL.
             context = trust_context()
+            if sys.platform == 'darwin':
+                from .word_install import NativeSettings
+                if not NativeSettings().trusted(Path(config['cert'])):
+                    raise ValueError('System Keychain trust is not confirmed')
+                # OpenSSL doesn't read Keychain. A private CA is accepted here
+                # only after the system SSL/hostname policy has verified it.
+                context = ssl.create_default_context(cafile=config['cert'])
             from urllib.request import build_opener, ProxyHandler, HTTPSHandler
             opener = build_opener(ProxyHandler({}), HTTPSHandler(context=context))
             with opener.open(result['origin'] + '/api/health', timeout=3) as response:
@@ -159,4 +197,5 @@ def status(root, app, verify=False):
             result.update(state='trusted', message='Проверка HTTPS в приложении пройдена. Теперь откройте адрес панели в браузере: предупреждения о сертификате быть не должно. Подключение в Word проверяется отдельно.')
         except (OSError, URLError, ValueError):
             result.update(state='needs_trust', message='Проверка HTTPS не пройдена. Убедитесь, что подключение запущено и сертификату установлено доверие. В Windows выберите «Текущий пользователь» → «Доверенные корневые центры сертификации», а не «Промежуточные центры сертификации». На Mac настройте доверие SSL в «Связке ключей» и проверьте адрес панели в Safari. Затем повторите проверку.')
+        app.state.word_https_check = {'fingerprint': result['fingerprint'], 'state': result['state'], 'message': result['message'], 'at': time.monotonic()}
     return result

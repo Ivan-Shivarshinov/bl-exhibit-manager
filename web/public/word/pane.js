@@ -1,4 +1,5 @@
 import {insertCitation, inspectUpdates, applyUpdates, currentDocx} from './office.js';
+import {startWordConnection} from './connection.js';
 
 const $ = id => document.getElementById(id);
 let catalog = null, selected = '', plan = null, busy = false;
@@ -83,11 +84,20 @@ $('send').onclick=()=>run(async()=>{
   $('status').textContent='Редакция передана. Откройте подачу, проверьте сопоставления и соберите комплект.';
 });
 function outsideWord() {
-  $('status').textContent='Страница панели открыта в браузере. Чтобы создавать сноски, подключите скачанный манифест в Microsoft Word по инструкции «Помощь и настройка» и откройте панель внутри Word.';
+  $('status').textContent='Страница панели открыта в браузере. В приложении выберите «Помощь и настройка» → «Подключить панель». Сноски создаются внутри Word.';
 }
 if(!globalThis.Office) { outsideWord(); }
-else Office.onReady(info=>{
+else Office.onReady(async info=>{
   if(info.host!==Office.HostType.Word){ outsideWord();return; }
-  if(!Office.context.requirements.isSetSupported('WordApi','1.5')){ $('status').textContent='Нужен Microsoft Word с поддержкой WordApi 1.5. Обновите Microsoft 365.';return; }
+  const supported=Office.context.requirements.isSetSupported('WordApi','1.5');
+  if(!supported) $('status').textContent='Нужен Word с поддержкой WordApi 1.5, например Microsoft 365 или Office 2024. Проверьте доступные обновления вашей редакции Word.';
+  try {
+    const stop=await startWordConnection(info, {
+      onError:message=>{$('connection-error').textContent=message;$('connection-error').hidden=false;},
+      onReady:()=>{$('connection-error').hidden=true;},
+    });
+    window.addEventListener('pagehide', stop, {once:true});
+  } catch { $('status').textContent='Word не подтвердил готовность панели. Закройте и снова откройте панель; обычная работа в приложении доступна.';return; }
+  if(!supported)return;
   $('workspace').hidden=false;$('status').textContent='Подключено к Word. Выберите подачу.';run(refresh);
 });

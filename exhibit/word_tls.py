@@ -10,6 +10,10 @@ import uvicorn
 def start_optional(app, root, http_port):
     """A broken add-in setup must not prevent ordinary document preparation."""
     app.state.word_connection = {'configured': False}
+    panels = getattr(app.state, 'word_panels', None)
+    if panels:
+        panels.clear()
+    app.state.word_https_check = {}
     try:
         listener = start(app, root, http_port)
         app.state.word_listener = listener

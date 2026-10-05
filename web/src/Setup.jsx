@@ -3,13 +3,28 @@ import React, {useEffect, useRef, useState} from 'react';
 const labels={available:'Доступен',missing:'Не установлен',needs_login:'Нужен вход',error:'Проверьте настройку',unchecked:'Не проверен',not_configured:'Не подключена',stopped:'Остановлено',running:'HTTPS запущен',trusted:'HTTPS проверен',needs_trust:'Проверьте доверие'};
 
 export function WordSetup({api}) {
-  const [status,setStatus]=useState(null),[busy,setBusy]=useState(''),[error,setError]=useState(''),[port,setPort]=useState('8769');
+  const [status,setStatus]=useState(null),[busy,setBusy]=useState(''),[error,setError]=useState(''),[port,setPort]=useState('');
   const [downloadState,setDownloadState]=useState(null);
-  useEffect(()=>{let live=true;api('/setup').then(s=>{if(live)setStatus(s.components.word);}).catch(e=>{if(live)setError(e.message);});return()=>{live=false;};},[]);
+  const [refreshError,setRefreshError]=useState('');
+  const [confirmation,setConfirmation]=useState('');
+  const refreshVersion=useRef(0);
+  const actionPending=useRef(false);
+  useEffect(()=>{
+    let live=true,timer,delay=1000;
+    async function refresh() {
+      const version=refreshVersion.current;
+      try {if(actionPending.current)return;const s=await api('/setup');if(live&&version===refreshVersion.current){setStatus(s.components.word);setRefreshError('');delay=s.components.word.installation?.busy?1000:5000;}}
+      catch(e){if(live&&version===refreshVersion.current){setRefreshError(e.message);setStatus(null);}}
+      finally {if(live)timer=setTimeout(refresh,delay);}
+    }
+    refresh();return()=>{live=false;clearTimeout(timer);};
+  },[]);
   async function action(path, body={}) {
-    setBusy(path==='/setup/word'?'Подготавливаем подключение…':'Проверяем HTTPS…');setError('');
+    refreshVersion.current++;
+    actionPending.current=true;
+    setConfirmation('');setBusy(path==='/setup/check/word'?'Проверяем HTTPS…':'Выполняем действие…');setError('');
     try {const value=await api(path,body);setStatus(value);if(path==='/setup/check/word')window.alert(value.message);}
-    catch(e){setError(e.message);if(path==='/setup/check/word')window.alert(e.message);} finally{setBusy('');}
+    catch(e){setError(e.message);if(path==='/setup/check/word')window.alert(e.message);} finally{setBusy('');actionPending.current=false;refreshVersion.current++;}
   }
   async function download(path,filename) {
     setBusy('Загружаем '+filename+'…');setError('');setDownloadState({path,state:'loading'});
@@ -24,24 +39,43 @@ export function WordSetup({api}) {
   }
   function downloadControl(path,filename,label) {
     const current=downloadState?.path===path?downloadState:null;
-    return <><p><button disabled={!!busy} aria-busy={current?.state==='loading'} onClick={()=>download(path,filename)}>{current?.state==='loading'?'Скачиваем…':label}</button></p>
+    return <><p><button disabled={!!busy||!!status?.installation?.busy} aria-busy={current?.state==='loading'} onClick={()=>download(path,filename)}>{current?.state==='loading'?'Скачиваем…':label}</button></p>
       {current?.message&&<p role={current.state==='error'?'alert':'status'} className={current.state==='error'?'error-note':'muted'}>{current.message}</p>}</>;
   }
-  return <section className="setup-card"><h2>Панель Word · по желанию</h2><p>Для создания сносок прямо в Microsoft Word. Загрузка DOCX, подготовка PDF и сборка комплекта работают без панели.</p>
+  const installation=status?.installation;
+  const blocked=!!busy||!!installation?.busy;
+  return <section className="setup-card"><h2>Панель Word · по желанию</h2>
+    <p>Создавайте сноски прямо в Word. Обычная загрузка DOCX/PDF и сборка комплекта доступны без панели.</p>
+    <p className="muted">Экспериментальное локальное подключение для пилота.</p>
     {error&&<p role="alert" className="error-note">{error}</p>}
-    <p role="status">{busy||status?.message||'Проверяем настройки…'}</p>
-    {status?.state==='error'&&<button disabled={!!busy} onClick={()=>action('/setup/check/word')}>Повторить проверку настроек Word</button>}
-    {status?.state==='not_configured'&&<><p>Приложение создаст сертификат только для этого компьютера. Доверие к нему вы подтвердите отдельно в настройках системы.</p><label className="field">HTTPS-порт<input type="number" min="1024" max="65535" value={port} onChange={e=>setPort(e.target.value)}/></label><button className="primary" disabled={!!busy||!port} onClick={()=>action('/setup/word',{port:Number(port)})}>Подготовить подключение Word</button></>}
-    {status?.origin&&<>
-      {status.state==='stopped'&&<p><button disabled={!!busy} onClick={()=>action('/setup/word')}>Запустить подключение</button></p>}
-      <ol className="setup-steps">
-        <li><b>Установка доверия сертификату.</b> {status.generated?<>{downloadControl('/setup/word/certificate','BL-Exhibit-localhost.crt','Скачать сертификат')}<p>В Windows: откройте файл → «Установить сертификат» → «Текущий пользователь» → «Поместить все сертификаты в следующее хранилище» → «Обзор» → «Доверенные корневые центры сертификации». Завершите установку. Не выбирайте автоматическое хранилище или «Промежуточные центры сертификации».</p><p>На Mac: откройте файл в «Связке ключей», добавьте в «Вход», откройте сертификат → «Доверие» → Secure Sockets Layer (SSL) → «Всегда доверять». Подробная инструкция — ниже.</p><p>Установка меняет доверие на вашем компьютере и может потребовать пароль. Можно отказаться и продолжить без панели.</p><details><summary>Сверить сертификат перед установкой</summary><p>Имя: BL Exhibit Manager localhost. Действует до {status.expires}.</p><p className="fingerprint">SHA-256: {status.fingerprint}</p></details></>:<p>Используется прежний сертификат. Если доверие уже настроено, переустановка не нужна. Иначе восстановите доверие по инструкции поставщика этого сертификата.</p>}</li>
-        <li><b>Проверка соединения.</b><p><button disabled={!!busy} onClick={()=>action('/setup/check/word')}>Проверить HTTPS</button></p><p>Проверка соединения приложения не заменяет открытие панели в Word. На Mac доверие также проверьте, открыв адрес панели в Safari.</p></li>
-        <li><b>Открытие панели в браузере.</b><p><a href={status.origin+'/word/index.html'} target="_blank" rel="noopener">Открыть адрес панели</a></p><p>После установки доверия и проверки HTTPS откройте этот адрес в браузере (на Mac — в Safari). Предупреждения о сертификате быть не должно. Если оно появилось, вернитесь к первому шагу; не обходите предупреждение. Здесь достаточно увидеть страницу панели; сноска создаётся в Word.</p></li>
-        <li><b>Подключение в Word.</b>{downloadControl('/word/manifest','BLExhibitManager.Word.xml','Скачать манифест Word')}<p>Это локальное подключение, без магазина надстроек. Установите манифест по инструкции для Windows или Mac. Политика вашей организации может ограничивать установку.</p></li>
-      </ol>
-    </>}
-    <a className="button" href="/api/word/instructions" target="_blank" rel="noopener">Инструкция: доверие и подключение в Word</a>
+    {refreshError&&<p role="alert" className="error-note">Связь с приложением потеряна. {refreshError} Проверяем повторно…</p>}
+    <p role={installation?.phase==='error'?'alert':'status'}>{busy||installation?.message||'Проверяем настройки…'}</p>
+    {status?.origin&&<p><b>Защищённое соединение:</b> {labels[status.state]||status.message}.</p>}
+    {status?.panel&&<p role="status"><b>Панель в Word: {({connected:'подключена',unsupported:'версия не поддерживает нужные функции',disconnected:'связь потеряна',waiting:'ожидает открытия',unavailable:'соединение не запущено'})[status.panel.state]}.</b> {status.panel.message}</p>}
+    {!confirmation&&status&&<div className="actions">
+      {installation?.installed?<button className="primary" disabled={blocked} onClick={()=>action('/setup/word/open')}>Открыть Word с панелью</button>:<button className="primary" disabled={blocked} onClick={()=>setConfirmation('install')}>Подключить панель</button>}
+      {installation?.busy&&installation.phase!=='removing'&&<button disabled={!!busy||installation.phase==='cancelling'} onClick={()=>action('/setup/word/cancel')}>Отменить настройку</button>}
+    </div>}
+    {confirmation==='install'&&<div className="setup-consent">
+      <p>Приложение добавит доверие к своему сертификату для защищённого соединения только с этим компьютером, зарегистрирует панель в Word и откроет новый учебный документ. Действующие настройки сохраняются. Система может попросить подтверждение или пароль.</p>
+      <p>Рабочие документы остаются без изменений. Можно отказаться и продолжить без панели.</p>
+      <button className="primary" disabled={blocked} onClick={()=>action('/setup/word/install',{consent:true})}>Разрешить и подключить</button> <button disabled={blocked} onClick={()=>setConfirmation('')}>Отмена</button>
+    </div>}
+    {confirmation==='remove'&&<div className="setup-consent"><p>Удалить созданную приложением регистрацию панели и установленное им доверие? Документы, проекты и прежние настройки сохранятся. Word останется открытым.</p><button disabled={blocked} onClick={()=>action('/setup/word/remove',{consent:true})}>Удалить подключение</button> <button disabled={blocked} onClick={()=>setConfirmation('')}>Отмена</button></div>}
+    {installation?.installed&&status?.panel?.state!=='connected'&&<p className="muted">Если панель не появилась, сохраните открытые документы, самостоятельно закройте и снова запустите Word. Затем нажмите «Открыть Word с панелью».</p>}
+    <details><summary>Диагностика и дополнительные действия</summary>
+      {status?.message&&<p>{status.message}</p>}
+      {status?.fingerprint&&<><p>Сертификат BL Exhibit Manager localhost, действует до {status.expires}.</p><p className="fingerprint">SHA-256: {status.fingerprint}</p></>}
+      {installation?.installed&&<p><button disabled={blocked} onClick={()=>setConfirmation('install')}>Повторить настройку</button></p>}
+      {installation?.can_remove&&<p><button disabled={blocked} onClick={()=>setConfirmation('remove')}>Удалить созданное подключение</button></p>}
+      {status?.origin&&<><p><button disabled={blocked} onClick={()=>action('/setup/check/word')}>Проверить HTTPS</button></p><p><a href={status.origin+'/word/index.html'} target="_blank" rel="noopener">Открыть адрес панели в браузере</a></p><p className="muted">Страница в браузере проверяет доступность адреса; сноски создаются внутри Word.</p></>}
+      <details><summary>Технические файлы для диагностики</summary>
+        <p>Эти действия не нужны для обычного подключения.</p>
+        {!status?.origin&&<><label className="field">HTTPS-порт (необязательно)<input type="number" min="1024" max="65535" value={port} onChange={e=>setPort(e.target.value)}/></label><button disabled={blocked} onClick={()=>action('/setup/word',port?{port:Number(port)}:{})}>Подготовить технические файлы</button></>}
+        {status?.origin&&<>{status.generated&&downloadControl('/setup/word/certificate','BL-Exhibit-localhost.crt','Скачать сертификат')}{downloadControl('/word/manifest','BLExhibitManager.Word.xml','Скачать манифест Word')}</>}
+      </details>
+      <a className="button" href="/api/word/instructions" target="_blank" rel="noopener">Инструкция по подключению</a>
+    </details>
   </section>;
 }
 

@@ -69,10 +69,26 @@ def main():
             context=ssl.create_default_context(cadata=certificate.decode())
             with urlopen(f'https://localhost:{tls_port}/api/health',context=context,timeout=5) as response:
                 assert json.load(response)['version']=='0.4.0'
+            # Protocol smoke with an explicitly simulated Word host. This does
+            # not claim Office.js validation in a real Word application.
+            def panel(body):
+                req=Request(f'https://localhost:{tls_port}/api/word/connection',data=json.dumps(body).encode(),
+                    headers={'X-Exhibit-Local':'1','Content-Type':'application/json'})
+                with urlopen(req,context=context,timeout=5) as response:return json.load(response)
+            assert request('/api/setup')['components']['word']['panel']['state']=='waiting'
+            token=panel({'action':'open','host':'Word','supported':True})['token']
+            assert request('/api/setup')['components']['word']['panel']['state']=='connected'
+            assert panel({'action':'ping','token':token})['active']
+            assert panel({'action':'close','token':token})['closed']
+            assert request('/api/setup')['components']['word']['panel']['state']=='disconnected'
+            token=panel({'action':'open','host':'Word','supported':False})['token']
+            assert request('/api/setup')['components']['word']['panel']['state']=='unsupported'
+            panel({'action':'close','token':token})
             configured=(data/'word-connection.json').read_bytes()
             command('--stop');command('--no-browser')
             assert (data/'word-connection.json').read_bytes()==configured
             assert request('/api/setup/word',{})['fingerprint']==connected['fingerprint']
+            assert request('/api/setup')['components']['word']['panel']['state']=='waiting'
             with urlopen(f'https://localhost:{tls_port}/api/health',context=context,timeout=5) as response:
                 assert json.load(response)['status']=='ok'
             summary=request('/api/setup/report',{'word':{'state':'running','key':'PRIVATE'},'secret':{'state':'available'}})
@@ -164,7 +180,7 @@ def main():
             after={str(p.relative_to(data)):p.read_bytes() for p in data.rglob('project.json')};assert before==after
             assert request(f'/api/projects/{pid}/exports/{first_export}')==package
             assert (folder/'LICENSE').is_file() and (folder/'THIRD-PARTY-NOTICES/PYTHON-LICENSE.txt').is_file()
-            print(json.dumps({'bundle':archive.name,'platform':sys.platform,'version':health['version'],'checks':['isolated start','static UI and optional Word pane assets','duplicate start','demo DOCX/PDF','PDFium rendering','structured extraction','PDF ZIP export','ready PDF upload and batch byte preservation','DOCX revisions without panel','immutable ZIP history','graceful stop','relocation and project persistence','licenses'],'result':'passed'}))
+            print(json.dumps({'bundle':archive.name,'platform':sys.platform,'version':health['version'],'checks':['isolated start','static UI and optional Word pane assets','panel presence protocol (simulated Word host)','duplicate start','demo DOCX/PDF','PDFium rendering','structured extraction','PDF ZIP export','ready PDF upload and batch byte preservation','DOCX revisions without panel','immutable ZIP history','graceful stop','relocation and project persistence','licenses'],'result':'passed'}))
         finally:
             command('--stop')
 

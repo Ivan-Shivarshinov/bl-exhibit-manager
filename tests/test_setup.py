@@ -46,6 +46,19 @@ class SetupTests(TestCase):
         self.assertEqual(word_setup.status(self.root, self.app)['state'], 'error')
         self.assertEqual((self.root/'word-connection.json').read_text('utf-8'), 'not json')
 
+    def test_automatic_port_when_default_is_used_by_http_or_another_process(self):
+        word_setup.prepare(self.root, 8769)
+        config, _ = word_setup.configuration(self.root, 8769)
+        self.assertNotEqual(config['port'], 8769)
+        second = self.root / 'second'
+        with socket.socket() as sock:
+            try:
+                sock.bind(('127.0.0.1', 8769))
+            except OSError:
+                pass  # An existing listener already exercises occupied-default handling.
+            word_setup.prepare(second, 8765)
+        self.assertNotEqual(word_setup.configuration(second)[0]['port'], 8769)
+
     def test_live_listener_without_system_trust_then_explicit_test_trust(self):
         @self.app.get('/api/health')
         def health(): return {'application': 'bl-exhibit-manager'}
@@ -56,7 +69,9 @@ class SetupTests(TestCase):
             self.assertEqual(word_setup.status(self.root, self.app, True)['state'], 'needs_trust')
             config, _ = word_setup.configuration(self.root)
             context = ssl.create_default_context(cafile=config['cert'])
-            with patch.object(word_setup, 'trust_context', return_value=context):
+            # This supplies test-client trust, not proof of real system trust.
+            from exhibit.word_install import NativeSettings
+            with patch.object(word_setup, 'trust_context', return_value=context), patch.object(NativeSettings, 'trusted', return_value=True):
                 self.assertEqual(word_setup.status(self.root, self.app, True)['state'], 'trusted')
         finally:
             listener[0].should_exit = True
