@@ -27,6 +27,11 @@ def main():
         exe=folder/('BLExhibitManager.exe' if os.name=='nt' else 'BLExhibitManager.app/Contents/MacOS/BLExhibitManager')
         data=root/'Isolated project data';cwd=root/'Empty working folder';cwd.mkdir()
         env=os.environ.copy();env['EXHIBIT_DATA_DIR']=str(data)
+        home=root/'Isolated user profile';home.mkdir()
+        env['HOME']=env['USERPROFILE']=str(home)
+        if os.name=='nt':
+            env['APPDATA']=str(home/'AppData/Roaming')
+            env['LOCALAPPDATA']=str(home/'AppData/Local')
         for name in ('PYTHONHOME','PYTHONPATH','VIRTUAL_ENV','CONDA_PREFIX'):env.pop(name,None)
         env['PATH']=str(Path(os.environ['SYSTEMROOT'])/'System32') if os.name=='nt' else '/usr/bin:/bin'
         with socket.socket() as sock:sock.bind(('127.0.0.1',0));port=sock.getsockname()[1]

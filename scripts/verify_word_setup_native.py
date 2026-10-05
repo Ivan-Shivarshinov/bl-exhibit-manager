@@ -30,7 +30,7 @@ def main():
         raise SystemExit('Run only on disposable GitHub Actions Windows/macOS runners.')
     with TemporaryDirectory(prefix='bl-word-native-') as directory:
         root = Path(directory)
-        registration = r'Software\BLExhibitManager\CI\' + uuid.uuid4().hex
+        registration = r'Software\BLExhibitManager\CI' + '\\' + uuid.uuid4().hex
         settings = SimulatedWord(home=root/'home', registry=registration, keychain=root/'CI.keychain-db', admin_trust=sys.platform=='darwin')
         settings.home.mkdir()
         if sys.platform == 'darwin':
