@@ -148,6 +148,9 @@ class WordInstallTests(TestCase):
         self.assertFalse(self.settings.has_trust)
         self.assertFalse(self.settings.has_registration)
 
+        self.assertEqual(self.app.state.word_https_check, {})
+        self.assertNotEqual(word_setup.status(self.root, self.app)['state'], 'trusted')
+
     def test_starter_documents_are_new_valid_docx_with_visible_registered_panel(self):
         first = starter_document(self.root); first.write_bytes(first.read_bytes()+b'USER_EDIT')
         before = first.read_bytes(); second = starter_document(self.root)

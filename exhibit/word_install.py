@@ -332,6 +332,8 @@ class Installer:
                 if isinstance(exc, Cancelled):
                     record['installed'] = bool(previous.get('installed'))
                     if not record['installed']: self.app.state.word_panels.clear()
+                # Rollback may have revoked the trust just verified above.
+                self.app.state.word_https_check = {}
                 try: self._save(record)
                 except OSError: rollback_error = True
             message = 'Настройка отменена. Можно повторить подключение или продолжить работу без панели.' if isinstance(exc, Cancelled) else str(exc) if isinstance(exc, ValueError) else 'Не удалось выполнить настройку. Проверьте доступ к данным приложения и повторите подключение.'
