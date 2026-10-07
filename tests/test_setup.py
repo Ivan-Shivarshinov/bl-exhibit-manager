@@ -85,6 +85,9 @@ class SetupTests(TestCase):
         _, cert = word_setup.configuration(self.root)
         entry = (cert.public_bytes(word_setup.serialization.Encoding.DER), 'x509_asn', True)
         listener = word_tls.start_optional(self.app, self.root, 8765)
+        # Mock only TLS trust: the installer must keep the real host platform.
+        from exhibit.word_install import manager
+        manager(self.app, self.root)
         try:
             with patch.object(word_setup.sys, 'platform', 'win32'):
                 # Reproduce automatic installation into Intermediate CAs: Python's
@@ -119,6 +122,8 @@ class SetupTests(TestCase):
         self.assertEqual(certificate.subject, previous.subject)
         entry = lambda c:(c.public_bytes(word_setup.serialization.Encoding.DER), 'x509_asn', True)
         listener = word_tls.start_optional(self.app, self.root, 8765)
+        from exhibit.word_install import manager
+        manager(self.app, self.root)
         try:
             with patch.object(word_setup.sys, 'platform', 'win32'), patch.object(ssl, 'enum_certificates', create=True, return_value=[entry(previous),entry(certificate)]):
                 context = word_setup.trust_context(certificate)
