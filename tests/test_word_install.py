@@ -28,6 +28,8 @@ class Settings:
     def registration(self, manifest):
         if self.failure == 'conflict': raise ValueError('Другая регистрация сохранена.')
         return self.has_registration
+    def registration_status(self, manifest):
+        return {'state':'current' if self.registration(manifest) else 'missing'}
     def trusted(self, cert, cancel=None): return self.has_trust
     def certificate_present(self, cert): return self.has_certificate
     def install_trust(self, cert, cancel):
@@ -35,10 +37,11 @@ class Settings:
         if self.failure == 'cancel': raise Cancelled()
         if self.failure == 'waiting':
             self.waiting.set(); cancel.wait(3); raise Cancelled()
-    def register(self, manifest):
+    def register(self, manifest, previous=None):
         self.calls.append('register'); self.has_registration = True
         if self.failure == 'partial': raise OSError('Simulated denied registration')
     def unregister(self, manifest): self.calls.append('unregister'); self.has_registration = False
+    def restore_registration(self, manifest, previous=None): self.unregister(manifest)
     def remove_trust(self, cert): self.calls.append('untrust'); self.has_trust = False
     def open_word(self, path):
         self.calls.append('open'); assert Document(path).paragraphs
@@ -57,7 +60,7 @@ class WordInstallTests(TestCase):
         self.settings = Settings()
         self.installer = Installer(self.root, self.app, self.settings)
         self.app.state.word_installer = self.installer
-        def context():
+        def context(certificate=None):
             import ssl
             return ssl.create_default_context(cafile=word_setup.configuration(self.root)[0]['cert'])
         self.trust = patch.object(word_setup, 'trust_context', side_effect=context)
@@ -136,6 +139,21 @@ class WordInstallTests(TestCase):
         self.assertEqual(self.installer.status()['phase'], 'waiting_word')
         self.assertEqual(self.settings.calls.count('trust'), 1)
 
+    def test_failed_trust_removal_does_not_report_installed_or_cached_trust_and_can_retry(self):
+        self.finish()
+        self.app.state.word_https_check = {'state':'trusted'}
+        with patch.object(self.settings, 'remove_trust', side_effect=ValueError('Удаление запрещено системой.')):
+            self.assertEqual(self.finish(remove=True)['phase'], 'error')
+        status = self.installer.status()
+        self.assertFalse(status['installed'])
+        self.assertTrue(status['can_remove'])
+        self.assertEqual(self.app.state.word_https_check, {})
+        self.assertFalse(self.settings.has_registration)
+        self.assertTrue(self.settings.has_trust)
+        self.assertFalse(Installer(self.root, self.app, self.settings).status()['installed'])
+        self.assertEqual(self.finish(remove=True)['phase'], 'removed')
+        self.assertEqual(self.finish()['phase'], 'waiting_word')
+
     def test_corrupt_ownership_marker_never_changes_system(self):
         (self.root/'word-installation.json').write_text('{"platform":"test","trust_owned":"yes"}', 'utf-8')
         self.assertEqual(self.finish()['phase'], 'error')
@@ -207,3 +225,11 @@ class WordInstallTests(TestCase):
             self.assertEqual(run.call_args.args[0], ['/usr/bin/security','add-trusted-cert','-r','deny','-p','ssl','-s','localhost','-k',str(settings.keychain),str(cert)])
         with patch.object(settings, 'trusted', return_value=True), patch.object(settings, 'run'):
             with self.assertRaises(ValueError): settings.remove_trust(cert)
+
+    def test_native_tools_use_sanitized_spawn_and_closed_stdin(self):
+        import subprocess
+        from unittest.mock import MagicMock
+        process=MagicMock(); process.communicate.return_value=(b'done',b''); process.returncode=0
+        with patch('exhibit.word_install.popen', return_value=process) as spawn:
+            self.assertEqual(NativeSettings().run(['synthetic-tool']), (0,b'done'))
+            self.assertEqual(spawn.call_args.kwargs['stdin'], subprocess.DEVNULL)

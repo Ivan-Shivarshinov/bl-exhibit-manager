@@ -36,9 +36,9 @@ def report(components):
     panel = components.get('word', {}).get('panel')
     if isinstance(panel, dict):
         panel_state = panel.get('state')
-        result['components']['word']['panel_state'] = panel_state if panel_state in ('connected', 'unsupported', 'disconnected', 'waiting', 'unavailable') else 'unavailable'
+        result['components']['word']['panel_state'] = panel_state if panel_state in ('connected', 'unsupported', 'disconnected', 'waiting', 'unavailable', 'setup_required') else 'unavailable'
     installation = components.get('word', {}).get('installation')
     if isinstance(installation, dict):
         phase = installation.get('phase')
-        result['components']['word']['installation_state'] = phase if phase in ('not_installed','preparing','system_confirmation','registering','opening_word','waiting_word','cancelling','cancelled','error','removing','removed') else 'error'
+        result['components']['word']['installation_state'] = phase if phase in ('not_installed','needs_update','preparing','system_confirmation','registering','opening_word','waiting_word','cancelling','cancelled','error','removing','removed') else 'error'
     return result

@@ -459,9 +459,10 @@ async def install_word(request: Request):
     from .word_install import manager
     from .word_setup import status
     body = await request.json()
-    if not isinstance(body, dict) or set(body) != {'consent'} or body['consent'] is not True:
+    if (not isinstance(body, dict) or set(body) - {'replacement_token'} != {'consent'} or body['consent'] is not True
+            or ('replacement_token' in body and (not isinstance(body['replacement_token'], str) or len(body['replacement_token']) != 64))):
         raise ValueError('Подтвердите настройку локального сертификата, регистрацию панели и открытие учебного Word.')
-    manager(app, store.root).begin()
+    manager(app, store.root).begin(replacement_token=body.get('replacement_token'))
     return await run_in_threadpool(status, store.root, app)
 
 

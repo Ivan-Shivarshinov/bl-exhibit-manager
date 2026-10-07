@@ -80,7 +80,8 @@ def main():
                 req=Request(f'https://localhost:{tls_port}/api/word/connection',data=json.dumps(body).encode(),
                     headers={'X-Exhibit-Local':'1','Content-Type':'application/json'})
                 with urlopen(req,context=context,timeout=5) as response:return json.load(response)
-            assert request('/api/setup')['components']['word']['panel']['state']=='waiting'
+            # Technical preparation alone does not finish native installation.
+            assert request('/api/setup')['components']['word']['panel']['state']=='setup_required'
             token=panel({'action':'open','host':'Word','supported':True})['token']
             assert request('/api/setup')['components']['word']['panel']['state']=='connected'
             assert panel({'action':'ping','token':token})['active']
@@ -93,7 +94,7 @@ def main():
             command('--stop');command('--no-browser')
             assert (data/'word-connection.json').read_bytes()==configured
             assert request('/api/setup/word',{})['fingerprint']==connected['fingerprint']
-            assert request('/api/setup')['components']['word']['panel']['state']=='waiting'
+            assert request('/api/setup')['components']['word']['panel']['state']=='setup_required'
             with urlopen(f'https://localhost:{tls_port}/api/health',context=context,timeout=5) as response:
                 assert json.load(response)['status']=='ok'
             summary=request('/api/setup/report',{'word':{'state':'running','key':'PRIVATE'},'secret':{'state':'available'}})

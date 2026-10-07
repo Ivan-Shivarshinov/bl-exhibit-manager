@@ -109,6 +109,26 @@ class SetupTests(TestCase):
             self.assertIs(word_setup.trust_context(), create.return_value)
             create.assert_called_once_with()
 
+    def test_windows_same_subject_roots_verify_only_the_exact_trusted_certificate(self):
+        @self.app.get('/api/health')
+        def health(): return {'application':'bl-exhibit-manager'}
+        word_setup.prepare(self.root, 8765, self.port)
+        _, certificate = word_setup.configuration(self.root)
+        other = self.root/'other'; word_setup.prepare(other, 8765)
+        _, previous = word_setup.configuration(other)
+        self.assertEqual(certificate.subject, previous.subject)
+        entry = lambda c:(c.public_bytes(word_setup.serialization.Encoding.DER), 'x509_asn', True)
+        listener = word_tls.start_optional(self.app, self.root, 8765)
+        try:
+            with patch.object(word_setup.sys, 'platform', 'win32'), patch.object(ssl, 'enum_certificates', create=True, return_value=[entry(previous),entry(certificate)]):
+                context = word_setup.trust_context(certificate)
+                self.assertEqual(context.cert_store_stats()['x509_ca'], 1)
+                self.assertEqual(word_setup.status(self.root, self.app, True)['state'], 'trusted')
+            with patch.object(word_setup.sys, 'platform', 'win32'), patch.object(ssl, 'enum_certificates', create=True, return_value=[entry(previous)]):
+                self.assertEqual(word_setup.status(self.root, self.app, True)['state'], 'needs_trust')
+        finally:
+            listener[0].should_exit = True; listener[1].join(5)
+
     def test_summary_does_not_invoke_cli_or_mutate_files(self):
         with patch.object(store, 'root', self.root), patch.object(diagnostics.translation_cli, 'status') as cli:
             client = TestClient(app, base_url='http://localhost')

@@ -44,29 +44,32 @@ export function WordSetup({api}) {
   }
   const installation=status?.installation;
   const blocked=!!busy||!!installation?.busy;
+  const installationMessage=installation?.phase==='waiting_word'&&status?.panel?.state==='connected'?'Настройка выполнена. Панель подключена и отвечает в Word.':installation?.message;
   return <section className="setup-card"><h2>Панель Word · по желанию</h2>
     <p>Создавайте сноски прямо в Word. Обычная загрузка DOCX/PDF и сборка комплекта доступны без панели.</p>
     <p className="muted">Экспериментальное локальное подключение для пилота.</p>
     {error&&<p role="alert" className="error-note">{error}</p>}
     {refreshError&&<p role="alert" className="error-note">Связь с приложением потеряна. {refreshError} Проверяем повторно…</p>}
-    <p role={installation?.phase==='error'?'alert':'status'}>{busy||installation?.message||'Проверяем настройки…'}</p>
+    <p role={installation?.phase==='error'?'alert':'status'}>{busy||installationMessage||'Проверяем настройки…'}</p>
     {status?.origin&&<p><b>Защищённое соединение:</b> {labels[status.state]||status.message}.</p>}
-    {status?.panel&&<p role="status"><b>Панель в Word: {({connected:'подключена',unsupported:'версия не поддерживает нужные функции',disconnected:'связь потеряна',waiting:'ожидает открытия',unavailable:'соединение не запущено'})[status.panel.state]}.</b> {status.panel.message}</p>}
+    {installation?.registration_message&&installation.registration_message!==installation.message&&<p>{installation.registration_message}</p>}
+    {status?.panel&&<p role="status"><b>Панель в Word: {({connected:'подключена',unsupported:'версия не поддерживает нужные функции',disconnected:'связь потеряна',waiting:'ожидает открытия',unavailable:'соединение не запущено',setup_required:'настройка не завершена'})[status.panel.state]}.</b> {status.panel.message}</p>}
     {!confirmation&&status&&<div className="actions">
-      {installation?.installed?<button className="primary" disabled={blocked} onClick={()=>action('/setup/word/open')}>Открыть Word с панелью</button>:<button className="primary" disabled={blocked} onClick={()=>setConfirmation('install')}>Подключить панель</button>}
+      {installation?.installed?<button className="primary" disabled={blocked} onClick={()=>action('/setup/word/open')}>Открыть новый учебный документ в Word</button>:<button className="primary" disabled={blocked||installation?.registration_blocked} onClick={()=>setConfirmation({token:installation?.replacement_token})}>{installation?.replacement_token?'Обновить подключение':'Подключить панель'}</button>}
       {installation?.busy&&installation.phase!=='removing'&&<button disabled={!!busy||installation.phase==='cancelling'} onClick={()=>action('/setup/word/cancel')}>Отменить настройку</button>}
     </div>}
-    {confirmation==='install'&&<div className="setup-consent">
+    {confirmation&&confirmation!=='remove'&&<div className="setup-consent">
+      {confirmation.token&&<p>Word сейчас подключён к другой копии BL Exhibit Manager. Обновление переключит панель на это приложение. Прежняя регистрация будет сохранена и восстановлена при отмене незавершённой настройки, ошибке установки или удалении нового подключения. Прежние файлы и сертификаты останутся без изменений.</p>}
       <p>Приложение добавит доверие к своему сертификату для защищённого соединения только с этим компьютером, зарегистрирует панель в Word и откроет новый учебный документ. Действующие настройки сохраняются. Система может попросить подтверждение или пароль.</p>
       <p>Рабочие документы остаются без изменений. Можно отказаться и продолжить без панели.</p>
-      <button className="primary" disabled={blocked} onClick={()=>action('/setup/word/install',{consent:true})}>Разрешить и подключить</button> <button disabled={blocked} onClick={()=>setConfirmation('')}>Отмена</button>
+      <button className="primary" disabled={blocked} onClick={()=>action('/setup/word/install',{consent:true,...(confirmation.token?{replacement_token:confirmation.token}:{})})}>{confirmation.token?'Разрешить и обновить':'Разрешить и подключить'}</button> <button disabled={blocked} onClick={()=>setConfirmation('')}>Отмена</button>
     </div>}
-    {confirmation==='remove'&&<div className="setup-consent"><p>Удалить созданную приложением регистрацию панели и установленное им доверие? Документы, проекты и прежние настройки сохранятся. Word останется открытым.</p><button disabled={blocked} onClick={()=>action('/setup/word/remove',{consent:true})}>Удалить подключение</button> <button disabled={blocked} onClick={()=>setConfirmation('')}>Отмена</button></div>}
-    {installation?.installed&&status?.panel?.state!=='connected'&&<p className="muted">Если панель не появилась, сохраните открытые документы, самостоятельно закройте и снова запустите Word. Затем нажмите «Открыть Word с панелью».</p>}
+    {confirmation==='remove'&&<div className="setup-consent"><p>Удалить созданную приложением регистрацию панели и установленное им доверие? Если обновлялось прежнее подключение, его регистрация будет восстановлена. Документы, проекты и прежние настройки сохранятся. Word останется открытым.</p><button disabled={blocked} onClick={()=>action('/setup/word/remove',{consent:true})}>Удалить подключение</button> <button disabled={blocked} onClick={()=>setConfirmation('')}>Отмена</button></div>}
+    {installation?.installed&&status?.panel?.state!=='connected'&&<p className="muted">Если панель не появилась, сохраните открытые документы, самостоятельно закройте и снова запустите Word. Затем нажмите «Открыть новый учебный документ в Word».</p>}
     <details><summary>Диагностика и дополнительные действия</summary>
       {status?.message&&<p>{status.message}</p>}
       {status?.fingerprint&&<><p>Сертификат BL Exhibit Manager localhost, действует до {status.expires}.</p><p className="fingerprint">SHA-256: {status.fingerprint}</p></>}
-      {installation?.installed&&<p><button disabled={blocked} onClick={()=>setConfirmation('install')}>Повторить настройку</button></p>}
+      {installation?.installed&&<p><button disabled={blocked} onClick={()=>setConfirmation({})}>Повторить настройку</button></p>}
       {installation?.can_remove&&<p><button disabled={blocked} onClick={()=>setConfirmation('remove')}>Удалить созданное подключение</button></p>}
       {status?.origin&&<><p><button disabled={blocked} onClick={()=>action('/setup/check/word')}>Проверить HTTPS</button></p><p><a href={status.origin+'/word/index.html'} target="_blank" rel="noopener">Открыть адрес панели в браузере</a></p><p className="muted">Страница в браузере проверяет доступность адреса; сноски создаются внутри Word.</p></>}
       <details><summary>Технические файлы для диагностики</summary>
@@ -104,7 +107,7 @@ export default function Setup({api,onClose}) {
         <h2>{name==='converter'?'Основной PDF':name==='claude'?'Перевод через Claude':'Перевод через Codex'}</h2>
         <p role="status"><b>{pending[name]?'Проверяем…':labels[data.components[name].state]}</b></p>
         <p>{data.components[name].message||(name==='converter'?'Нужен при преобразовании DOCX в PDF.':'Для перевода через личную подписку нужен официальный CLI и вход в аккаунт. Проверка не отправляет текст и не обращается к модели.')}</p>
-        {name==='converter'?<a href="https://www.libreoffice.org/download/download-libreoffice/" target="_blank" rel="noopener">Скачать LibreOffice</a>:<p><a href={name==='claude'?'https://code.claude.com/docs/en/quickstart':'https://developers.openai.com/codex/cli'} target="_blank" rel="noopener">Установить официальный CLI</a>. Затем войдите командой <code>{name==='claude'?'claude auth login':'codex login'}</code>.</p>}
+        {!pending[name]&&data.components[name].state==='available'?<p className="muted">{name==='converter'?'Можно подготовить основной PDF в разделе «Проверка и экспорт».':'Для перевода выберите документ и нажмите «Открыть переводчик». Доступ к модели проверяется при запуске перевода с вашего согласия.'}</p>:name==='converter'?<a href="https://www.libreoffice.org/download/download-libreoffice/" target="_blank" rel="noopener">Скачать LibreOffice</a>:!pending[name]&&<p>{data.components[name].state!=='needs_login'&&<><a href={name==='claude'?'https://code.claude.com/docs/en/quickstart':'https://developers.openai.com/codex/cli'} target="_blank" rel="noopener">Установить официальный CLI</a>. </>}Войдите командой <code>{name==='claude'?'claude auth login':'codex login'}</code>.</p>}
         <p><button disabled={pending[name]} aria-busy={!!pending[name]} onClick={()=>check(name)}>{pending[name]?'Проверяем…':name==='converter'?'Повторить проверку':`Проверить ${name==='claude'?'Claude':'Codex'}`}</button></p>{pending[name]&&name!=='converter'&&<p className="muted">Проверка может занять до 50 секунд.</p>}
       </section>)}</div>
       <WordSetup api={api}/>

@@ -2,6 +2,7 @@
 from datetime import datetime, timedelta, timezone
 import ipaddress
 import json
+import logging
 import os
 from pathlib import Path
 import socket
@@ -134,15 +135,21 @@ def prepare(root, http_port, port=None):
             raise ValueError('Не удалось сохранить настройку Word. Проверьте доступ к папке данных и свободное место.')
 
 
-def trust_context():
+def trust_context(certificate=None):
     if sys.platform != 'win32':
         return ssl.create_default_context()
     # Python's default Windows context imports both ROOT and CA as trust
     # anchors. That can trust our self-signed certificate in Intermediate CAs
     # even though Windows browsers reject it. Only ROOT can anchor this check.
     context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    # Several installations can have roots with the same display name. Select
+    # our exact system-trusted root, rather than OpenSSL's first subject match.
+    local_root = certificate is not None and certificate.subject == certificate.issuer
+    expected = certificate.public_bytes(serialization.Encoding.DER) if local_root else None
     for cert, encoding, trust in ssl.enum_certificates('ROOT'):
         if encoding == 'x509_asn' and (trust is True or ssl.Purpose.SERVER_AUTH.oid in trust):
+            if local_root and cert != expected:
+                continue
             try:
                 context.load_verify_locations(cadata=cert)
             except ssl.SSLError:
@@ -159,6 +166,8 @@ def status(root, app, verify=False):
     automatic = installation.get('installed') and time.monotonic() - checked.get('at', 0) >= 60
     result = _status(root, app, verify or automatic)
     result['installation'] = installation
+    if not installation.get('installed') and result.get('panel', {}).get('state') in ('waiting', 'unavailable'):
+        result['panel'] = {'state':'setup_required', 'message':'Сначала завершите подключение панели в этой карточке. Работающий HTTPS не означает, что панель установлена.'}
     return result
 
 
@@ -186,7 +195,7 @@ def _status(root, app, verify=False):
     if verify:
         try:
             # Direct loopback only, never system proxy or untrusted remote URL.
-            context = trust_context()
+            context = trust_context(cert) if sys.platform == 'win32' else trust_context()
             if sys.platform == 'darwin':
                 from .word_install import NativeSettings
                 if not NativeSettings().trusted(Path(config['cert'])):
@@ -200,7 +209,9 @@ def _status(root, app, verify=False):
                 health = json.loads(response.read(4096))
             if health.get('application') != 'bl-exhibit-manager': raise ValueError('Wrong listener')
             result.update(state='trusted', message='Защищённое соединение проверено через системное доверие. Связь с панелью внутри Word показана отдельно.')
-        except (OSError, URLError, ValueError):
+        except (OSError, URLError, ValueError) as exc:
+            reason = getattr(exc, 'reason', exc)
+            logging.getLogger(__name__).warning('Word HTTPS check failed: %s; TLS verification code: %s', type(reason).__name__, getattr(reason, 'verify_code', None))
             result.update(state='needs_trust', message='Защищённое соединение не подтверждено. Повторите настройку панели и подтвердите запрос системы, если он появится. При ограничении организации можно продолжить работу без панели.')
         app.state.word_https_check = {'fingerprint': result['fingerprint'], 'state': result['state'], 'message': result['message'], 'at': time.monotonic()}
     return result

@@ -45,6 +45,7 @@ async function loadProject() {
   catalog=id?await api('/word/projects/'+id):null;
   if(catalog)$('form').value=catalog.style.name_form;
   render();
+  $('status').textContent=catalog?`Подача «${catalog.name}» открыта. Выберите приложение для сноски.`:'Подключено к Word. Выберите подачу.';
 }
 async function refresh() {
   const prior=$('project').value, projects=await api('/projects');
