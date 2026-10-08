@@ -65,7 +65,7 @@ export function WordSetup({api}) {
       <button className="primary" disabled={blocked} onClick={()=>action('/setup/word/install',{consent:true,...(confirmation.token?{replacement_token:confirmation.token}:{})})}>{confirmation.token?'Разрешить и обновить':'Разрешить и подключить'}</button> <button disabled={blocked} onClick={()=>setConfirmation('')}>Отмена</button>
     </div>}
     {confirmation==='remove'&&<div className="setup-consent"><p>Удалить созданную приложением регистрацию панели и установленное им доверие? Если обновлялось прежнее подключение, его регистрация будет восстановлена. Документы, проекты и прежние настройки сохранятся. Word останется открытым.</p><button disabled={blocked} onClick={()=>action('/setup/word/remove',{consent:true})}>Удалить подключение</button> <button disabled={blocked} onClick={()=>setConfirmation('')}>Отмена</button></div>}
-    {installation?.installed&&status?.panel?.state!=='connected'&&<p className="muted">Если панель не появилась, сохраните открытые документы, самостоятельно закройте и снова запустите Word. Затем нажмите «Открыть новый учебный документ в Word».</p>}
+    {installation?.installed&&installation?.phase!=='word_restart_required'&&status?.panel?.state!=='connected'&&<p className="muted">Если панель не появилась, сохраните открытые документы и закройте все окна Word. Затем нажмите «Открыть новый учебный документ в Word»; приложение запустит Word заново.</p>}
     <details><summary>Диагностика и дополнительные действия</summary>
       {status?.message&&<p>{status.message}</p>}
       {status?.fingerprint&&<><p>Сертификат BL Exhibit Manager localhost, действует до {status.expires}.</p><p className="fingerprint">SHA-256: {status.fingerprint}</p></>}

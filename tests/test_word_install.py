@@ -25,6 +25,7 @@ class Settings:
 
     def check_word(self):
         if self.failure == 'missing': raise ValueError('Word не найден.')
+    def word_running(self, cancel=None): return False
     def registration(self, manifest):
         if self.failure == 'conflict': raise ValueError('Другая регистрация сохранена.')
         return self.has_registration
@@ -160,6 +161,51 @@ class WordInstallTests(TestCase):
         self.assertEqual(self.finish()['phase'],'waiting_word')
         self.assertEqual(word_setup.configuration(self.root)[0]['cert'],config['cert'])
 
+    def test_windows_renewal_with_open_word_waits_for_user_restart_and_survives_app_restart(self):
+        self.settings.platform = 'win32'
+        attempts = []
+        def import_root(cert, cancel):
+            attempts.append(cert)
+            if len(attempts) == 2: self.settings.has_trust = self.settings.has_certificate = True
+            return True
+        with patch.object(self.settings, 'install_trust', side_effect=import_root), patch.object(self.settings, 'word_running', return_value=True):
+            result = self.finish()
+            self.assertEqual(result['phase'], 'word_restart_required')
+            self.assertTrue(result['installed'])
+            self.assertNotIn('open', self.settings.calls)
+            restarted = Installer(self.root, self.app, self.settings)
+            self.assertEqual(restarted.status()['phase'], 'word_restart_required')
+            with self.assertRaisesRegex(ValueError, 'закройте все окна Word'): restarted.open()
+            self.assertFalse((self.root / 'word-local/starter').exists())
+        with patch.object(self.settings, 'word_running', return_value=False):
+            self.assertEqual(restarted.open()['phase'], 'waiting_word')
+        self.assertFalse(restarted._record()['restart_required'])
+        self.assertEqual(self.settings.calls.count('open'), 1)
+
+    def test_real_panel_presence_clears_persisted_restart_requirement(self):
+        self.finish()
+        record = self.installer._record(); record['restart_required'] = True
+        self.installer._save(record)
+        self.installer._phase('word_restart_required', 'Сохраните документы и закройте все окна Word.')
+        self.app.state.word_panels.update({'action': 'open', 'host': 'Word', 'supported': True})
+        self.assertEqual(self.installer.status()['phase'], 'waiting_word')
+        self.assertFalse(self.installer._record()['restart_required'])
+
+    def test_native_word_process_check_is_read_only_bounded_and_platform_specific(self):
+        settings = NativeSettings(platform='win32')
+        with patch.dict('os.environ', {'SYSTEMROOT': 'C:/Windows'}), patch.object(settings, 'run', return_value=(0, b'"WINWORD.EXE","123","Console","1","25 K"')) as run:
+            self.assertTrue(settings.word_running())
+            args = run.call_args.args[0]
+            self.assertEqual(Path(args[0]).name, 'tasklist.exe')
+            self.assertEqual(args[1:], ['/FI', 'IMAGENAME eq WINWORD.EXE', '/FO', 'CSV', '/NH'])
+            self.assertEqual(run.call_args.kwargs['timeout'], 5)
+        with patch.dict('os.environ', {'SYSTEMROOT': 'C:/Windows'}), patch.object(settings, 'run', return_value=(0, b'INFO: No tasks match the criteria.')):
+            self.assertFalse(settings.word_running())
+        with patch.dict('os.environ', {'SYSTEMROOT': 'C:/Windows'}), patch.object(settings, 'run', side_effect=ValueError('Could not inspect')):
+            with self.assertRaises(ValueError): settings.word_running()
+        with patch.object(settings, 'run') as run:
+            self.assertFalse(NativeSettings(platform='darwin').word_running())
+            run.assert_not_called()
     def test_windows_cancel_after_renewal_revokes_only_new_trust_and_can_retry(self):
         self.settings.platform='win32'; attempts=[]; removed=[]
         def import_root(cert,cancel):

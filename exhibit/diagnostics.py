@@ -40,5 +40,5 @@ def report(components):
     installation = components.get('word', {}).get('installation')
     if isinstance(installation, dict):
         phase = installation.get('phase')
-        result['components']['word']['installation_state'] = phase if phase in ('not_installed','needs_update','preparing','system_confirmation','registering','opening_word','waiting_word','cancelling','cancelled','error','removing','removed') else 'error'
+        result['components']['word']['installation_state'] = phase if phase in ('not_installed','needs_update','preparing','system_confirmation','registering','opening_word','waiting_word','word_restart_required','cancelling','cancelled','error','removing','removed') else 'error'
     return result

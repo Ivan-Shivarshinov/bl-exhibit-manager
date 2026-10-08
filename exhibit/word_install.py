@@ -125,6 +125,14 @@ class NativeSettings:
             raise ValueError('Microsoft Word не найден. Установите настольный Word с поддержкой WordApi 1.5; обычная работа доступна без него.')
         raise ValueError('Экспериментальное подключение поддерживается на Windows и macOS.')
 
+    def word_running(self, cancel=None):
+        if self.platform != 'win32': return False
+        import csv
+        tasklist = str(Path(os.environ['SYSTEMROOT']) / 'System32/tasklist.exe')
+        _, output = self.run([tasklist, '/FI', 'IMAGENAME eq WINWORD.EXE', '/FO', 'CSV', '/NH'], cancel, timeout=5)
+        return any(row and row[0].casefold() == 'winword.exe'
+                   for row in csv.reader(output.decode('utf-8', errors='replace').splitlines()))
+
     def check_word(self):
         path = self.word()
         if self.platform == 'darwin':
@@ -307,10 +315,11 @@ class Installer:
         try:
             data = json.loads(path.read_text('utf-8'))
             fields = {'platform','fingerprint','trust_owned','certificate_owned','registration_owned','installed'}
-            if not isinstance(data, dict) or set(data) - {'previous_registration'} != fields or data.get('platform') != self.settings.platform:
+            if not isinstance(data, dict) or set(data) - {'previous_registration', 'restart_required'} != fields or data.get('platform') != self.settings.platform:
                 raise ValueError()
             if not isinstance(data['fingerprint'], str) or len(data['fingerprint']) != 64 or any(x not in '0123456789abcdef' for x in data['fingerprint']): raise ValueError()
             if any(type(data[key]) is not bool for key in ('trust_owned','certificate_owned','registration_owned','installed')): raise ValueError()
+            if 'restart_required' in data and type(data['restart_required']) is not bool: raise ValueError()
             snapshot = data.get('previous_registration')
             if snapshot is not None:
                 if not isinstance(snapshot, dict) or not isinstance(snapshot.get('value'), str) or len(snapshot['value']) > 1400000: raise ValueError()
@@ -335,6 +344,10 @@ class Installer:
             except (OSError, ValueError) as exc:
                 return {'phase':'error', 'message':str(exc) if isinstance(exc, ValueError) else 'Не удалось проверить регистрацию Word. Повторите настройку.', 'busy':busy}
             installed = bool(record.get('installed') and registration['state'] == 'current')
+            if installed and record.get('restart_required') and not busy and self.app.state.word_panels.status()['state'] == 'connected':
+                record['restart_required'] = False
+                self._save(record)
+                self._phase('waiting_word', 'Настройка выполнена. Панель подключена и отвечает в Word.')
             extra = {'installed':installed, 'can_remove':bool(record.get('trust_owned') or record.get('registration_owned')), 'busy':busy}
             if registration['state'] == 'previous':
                 extra.update(replacement_token=registration['token'], registration_message='Найдено прежнее подключение BL Exhibit Manager. Обновите его, чтобы панель работала с этим приложением.')
@@ -346,7 +359,7 @@ class Installer:
                 try:
                     progress = json.loads(path.read_text('utf-8'))
                     if not isinstance(progress, dict) or set(progress) != {'phase','message'} or not all(isinstance(v, str) for v in progress.values()): raise ValueError()
-                    if progress['phase'] not in ('error','cancelled','removed','waiting_word'):
+                    if progress['phase'] not in ('error','cancelled','removed','waiting_word','word_restart_required'):
                         progress = {'phase':'error', 'message':'Предыдущая настройка прервалась. Повторите подключение; сохранённые проекты доступны.'}
                 except (OSError, ValueError):
                     progress = {'phase':'error', 'message':'Не удалось прочитать результат прежней настройки. Повторите подключение; проекты доступны.'}
@@ -356,6 +369,8 @@ class Installer:
                 return {**extra, 'phase':'needs_update' if registration['state']=='previous' else 'error', 'message':extra['registration_message']}
             if record.get('installed') and not installed:
                 return {**extra, 'phase':'error', 'message':'Сохранённая регистрация Word отсутствует. Подключите панель заново; проекты сохранены.'}
+            if installed and record.get('restart_required'):
+                return {**extra, 'phase':'word_restart_required', 'message':'Подключение обновлено. Сохраните документы и закройте все окна Word. Затем нажмите «Открыть новый учебный документ в Word»; приложение запустит Word заново.'}
             if progress: return {**progress, **extra}
             return {**extra, 'phase':'waiting_word' if installed else 'not_installed', 'message':'Настройка сохранена. Откройте панель в Word.' if installed else 'Панель подключается по вашему желанию.'}
 
@@ -418,6 +433,7 @@ class Installer:
                       'trust_owned': bool(previous.get('trust_owned') or not trusted),
                       'certificate_owned':bool(previous.get('certificate_owned') or not present),
                       'registration_owned': bool(previous.get('registration_owned') or not registered), 'installed':False,
+                      'restart_required': bool(previous.get('restart_required')),
                       'previous_registration': replacement or previous.get('previous_registration')}
             self._save(record)  # Ownership is persisted before any system mutation.
             self._check_cancel()
@@ -436,17 +452,21 @@ class Installer:
                     with word_setup.SETUP_LOCK:
                         old_config = (self.root / 'word-connection.json').read_bytes()
                         old_fingerprint = record['fingerprint']
+                        old_restart = record['restart_required']
                         try:
                             word_setup.prepare(self.root, getattr(self.app.state, 'http_port', 8765), renew=True)
                             config, cert = word_setup.configuration(self.root, getattr(self.app.state, 'http_port', 8765))
                             record['fingerprint'] = cert.fingerprint(word_setup.hashes.SHA256()).hex()
+                            record['restart_required'] = True
                             self._save(record)
                         except (OSError, ValueError):
                             word_setup.atomic_write(self.root / 'word-connection.json', old_config)
                             record['fingerprint'] = old_fingerprint
+                            record['restart_required'] = old_restart
                             raise
                         renewed = True
                         cert_path = Path(config['cert'])
+                        self.app.state.word_panels.clear()
                     # Do not hold the setup lock while waiting for HTTP tasks in
                     # the old listener: an in-flight diagnostic may need it.
                     from . import word_tls
@@ -476,6 +496,12 @@ class Installer:
                 if verified['state'] != 'trusted': raise ValueError('Не удалось проверить защищённое соединение. Обычная работа доступна; повторите подключение.')
                 self._check_cancel()
                 record['installed'] = True; self._save(record)
+            if self.settings.platform == 'win32' and (renewed or record.get('restart_required')):
+                record['restart_required'] = self.settings.word_running(self.cancel)
+                self._save(record)
+                if record['restart_required']:
+                    self._phase('word_restart_required', 'Подключение обновлено. Сохраните документы и закройте все окна Word. Затем нажмите «Открыть новый учебный документ в Word»; приложение запустит Word заново.')
+                    return
             self._phase('opening_word', 'Открываем новый учебный документ в Word…')
             self._check_cancel()
             self.settings.open_word(starter_document(self.root))
@@ -537,7 +563,12 @@ class Installer:
         with self.lock:
             if self.thread and self.thread.is_alive(): raise ValueError('Дождитесь окончания настройки.')
             if not self.status().get('installed'): raise ValueError('Сначала подключите или обновите панель в настройках.')
+            record = self._record()
+            if record.get('restart_required') and self.settings.word_running():
+                raise ValueError('Сначала сохраните документы и закройте все окна Word. Затем нажмите «Открыть новый учебный документ в Word» ещё раз; приложение запустит Word заново.')
             self.settings.open_word(starter_document(self.root))
+            if record.get('restart_required'):
+                record['restart_required'] = False; self._save(record)
             self._phase('waiting_word', 'Учебный документ открыт. Дождитесь панели в Word; статус обновится автоматически.')
             return self.status()
 
