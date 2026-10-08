@@ -248,8 +248,23 @@ class NativeSettings:
 
     def install_trust(self, cert_path, cancel):
         if self.platform == 'win32':
-            scope = [] if self.admin_trust else ['-user']
-            self.run([str(Path(os.environ['SYSTEMROOT']) / 'System32/certutil.exe'), *scope, '-addstore', 'Root', str(cert_path)], cancel)
+            from tempfile import TemporaryDirectory
+            from .launch import command
+            with TemporaryDirectory(prefix='bl-word-trust-') as folder:
+                result = Path(folder)/'result.json'
+                args = command('--windows-root-add', str(cert_path), str(result))
+                if self.admin_trust: args.append('--windows-root-machine')
+                code, _ = self.run(args, cancel, check=False)
+                try:
+                    value = json.loads(result.read_text('utf-8'))
+                    if not isinstance(value, dict): raise ValueError()
+                except (OSError, ValueError):
+                    raise ValueError('Не удалось получить результат добавления сертификата Windows. Повторите подключение; проекты сохранены.')
+                if code or value.get('error'):
+                    raise ValueError(value.get('error') or 'Windows не завершила добавление сертификата. Можно повторить подключение.')
+                if type(value.get('added')) is not bool:
+                    raise ValueError('Не удалось проверить результат добавления сертификата Windows. Повторите подключение.')
+                return value['added']
         else:
             args = ['/usr/bin/security', 'add-trusted-cert', '-r', 'trustRoot', '-p', 'ssl', '-s', 'localhost', '-k', str(self.keychain), str(cert_path)]
             if self.admin_trust: args = ['/usr/bin/sudo', '-n', *args[:2], '-d', *args[2:]]
@@ -409,8 +424,11 @@ class Installer:
             if not trusted:
                 self._phase('system_confirmation', 'Подтвердите запрос системы для локального сертификата, если он появился. Можно отменить настройку.')
                 added_trust = True
-                self.settings.install_trust(cert_path, self.cancel)
-                if not self.settings.trusted(cert_path, self.cancel): raise ValueError('Системное доверие не подтверждено. Возможно, настройка ограничена вашей организацией; обычная работа доступна.')
+                added = self.settings.install_trust(cert_path, self.cancel)
+                if added is False:
+                    added_trust = False
+                    record['trust_owned'] = bool(previous.get('trust_owned')); self._save(record)
+                if not self.settings.trusted(cert_path, self.cancel): raise ValueError('Система не подтвердила доверие сертификату приложения. Повторите подключение; обычная работа доступна.')
             self._check_cancel()
             self._phase('registering', 'Подключаем панель в настройках Word…')
             if not registered:

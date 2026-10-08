@@ -102,6 +102,27 @@ class WordInstallTests(TestCase):
         self.assertTrue(self.settings.has_trust); self.assertTrue(self.settings.has_registration)
         self.assertEqual(self.settings.calls, ['open'])
 
+    def test_successful_helper_without_trust_stops_before_word_and_allows_retry(self):
+        with patch.object(self.settings,'install_trust',return_value=None):
+            result=self.finish()
+        self.assertEqual(result['phase'],'error')
+        self.assertIn('не подтвердила',result['message'])
+        self.assertNotIn('организац',result['message'])
+        self.assertFalse(self.installer._record()['installed'])
+        self.assertNotIn('register',self.settings.calls)
+        self.assertNotIn('open',self.settings.calls)
+        self.assertEqual(self.finish()['phase'],'waiting_word')
+
+    def test_certificate_added_concurrently_is_not_owned_or_removed(self):
+        def already_present(cert,cancel):
+            self.settings.has_trust=self.settings.has_certificate=True
+            return False
+        with patch.object(self.settings,'install_trust',side_effect=already_present):
+            self.assertEqual(self.finish()['phase'],'waiting_word')
+        self.assertFalse(self.installer._record()['trust_owned'])
+        self.assertEqual(self.finish(True)['phase'],'removed')
+        self.assertTrue(self.settings.has_trust)
+
     def test_denied_or_cancelled_setup_rolls_back_own_partial_changes_and_retries(self):
         for failure in ('cancel','partial'):
             self.settings.failure = failure

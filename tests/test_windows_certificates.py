@@ -6,7 +6,7 @@ from tempfile import TemporaryDirectory
 from unittest import TestCase, skipUnless
 import uuid
 
-from exhibit import word_setup, windows_certificates
+from exhibit import launch, word_setup, windows_certificates
 from exhibit.word_install import NativeSettings
 
 
@@ -23,12 +23,23 @@ class WindowsCertificatesTests(TestCase):
             paths=[Path(word_setup.configuration(base/name)[0]['cert']) for name in ('one','two')]
             ders=[word_setup.configuration(base/name)[1].public_bytes(word_setup.serialization.Encoding.DER) for name in ('one','two')]
             try:
-                for path in paths:settings.run([tool,'-user','-f','-addstore',store,str(path)],timeout=10)
+                # Create only a unique non-trusting test store, then exercise the
+                # same protected-provider API used by the real installer.
+                settings.run([tool,'-user','-f','-addstore',store,str(paths[0])],timeout=10)
+                windows_certificates.remove(ders[0],store=store)
+                self.assertTrue(windows_certificates.add(ders[0],store=store))
+                self.assertTrue(windows_certificates.add(ders[1],store=store))
+                self.assertFalse(windows_certificates.add(ders[0],store=store))
                 self.assertEqual({c[0] for c in ssl.enum_certificates(store)},set(ders))
                 self.assertTrue(windows_certificates.remove(ders[0],store=store))
                 self.assertEqual({c[0] for c in ssl.enum_certificates(store)},{ders[1]})
                 self.assertFalse(windows_certificates.remove(ders[0],store=store))
-                settings.run([tool,'-user','-f','-addstore',store,str(paths[0])],timeout=10)
+                result=base/'worker-result.json'
+                code,_=settings.run(launch.command('--windows-root-add',str(paths[0]),str(result),'--windows-root-store',store),timeout=20)
+                import json
+                self.assertEqual(code,0)
+                self.assertEqual(json.loads(result.read_text()),{'added':True})
+                self.assertEqual({c[0] for c in ssl.enum_certificates(store)},set(ders))
                 self.assertTrue(windows_certificates.remove(ders[0],store=store))
                 self.assertEqual({c[0] for c in ssl.enum_certificates('ROOT')},{c[0] for c in before})
             finally:
