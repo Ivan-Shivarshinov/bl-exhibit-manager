@@ -28,6 +28,18 @@ def start_optional(app, root, http_port):
         return None
 
 
+def restart_optional(app, root, http_port):
+    """Replace this application's TLS context after an owned certificate renewal."""
+    listener = getattr(app.state, 'word_listener', None)
+    if listener and listener[1].is_alive():
+        listener[0].should_exit = True
+        listener[1].join(timeout=5)
+        if listener[1].is_alive():
+            raise ValueError('Не удалось обновить соединение панели. Перезапустите приложение и повторите подключение; документы сохранены.')
+    app.state.word_listener = None
+    return start_optional(app, root, http_port)
+
+
 def start(app, root, http_port):
     path = root / 'word-connection.json'
     if not path.exists(): return None

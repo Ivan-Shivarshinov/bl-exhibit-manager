@@ -385,7 +385,7 @@ class Installer:
         if self.cancel.is_set(): raise Cancelled()
 
     def _install(self, replacement_token=None):
-        record = None; added_trust = added_registration = False
+        record = None; added_trust = added_registration = renewed = False
         try:
             self.settings.check_word(); self._check_cancel()
             manifest = self.root / 'BLExhibitManager.Word.xml'
@@ -425,10 +425,40 @@ class Installer:
                 self._phase('system_confirmation', 'Подтвердите запрос системы для локального сертификата, если он появился. Можно отменить настройку.')
                 added_trust = True
                 added = self.settings.install_trust(cert_path, self.cancel)
+                self._check_cancel()
+                trusted = self.settings.trusted(cert_path, self.cancel)
+                if added is True and not trusted and self.settings.platform == 'win32':
+                    # Windows may retain prior root approval after deletion while
+                    # accepting a repeated import only into its temporary cache.
+                    # Renew only our generated certificate, once, through the same
+                    # protected importer. Never change ProtectedRoots or policies.
+                    self._phase('preparing', 'Обновляем локальное подключение. Прежние сертификаты и документы сохранены…')
+                    with word_setup.SETUP_LOCK:
+                        old_config = (self.root / 'word-connection.json').read_bytes()
+                        old_fingerprint = record['fingerprint']
+                        try:
+                            word_setup.prepare(self.root, getattr(self.app.state, 'http_port', 8765), renew=True)
+                            config, cert = word_setup.configuration(self.root, getattr(self.app.state, 'http_port', 8765))
+                            record['fingerprint'] = cert.fingerprint(word_setup.hashes.SHA256()).hex()
+                            self._save(record)
+                        except (OSError, ValueError):
+                            word_setup.atomic_write(self.root / 'word-connection.json', old_config)
+                            record['fingerprint'] = old_fingerprint
+                            raise
+                        renewed = True
+                        cert_path = Path(config['cert'])
+                        from . import word_tls
+                        if not word_tls.restart_optional(self.app, self.root, getattr(self.app.state, 'http_port', 8765)):
+                            raise ValueError('Не удалось обновить соединение панели. Повторите подключение; документы сохранены.')
+                    self._check_cancel()
+                    self._phase('system_confirmation', 'Подтвердите запрос системы для нового локального сертификата BL Exhibit Manager localhost. Можно отменить настройку.')
+                    added = self.settings.install_trust(cert_path, self.cancel)
+                    self._check_cancel()
+                    trusted = self.settings.trusted(cert_path, self.cancel)
                 if added is False:
                     added_trust = False
-                    record['trust_owned'] = bool(previous.get('trust_owned')); self._save(record)
-                if not self.settings.trusted(cert_path, self.cancel): raise ValueError('Система не подтвердила доверие сертификату приложения. Повторите подключение; обычная работа доступна.')
+                    record['trust_owned'] = bool(previous.get('trust_owned')) and not renewed; self._save(record)
+                if not trusted: raise ValueError('Система не подтвердила доверие сертификату приложения. Повторите подключение; обычная работа доступна.')
             self._check_cancel()
             self._phase('registering', 'Подключаем панель в настройках Word…')
             if not registered:
@@ -462,7 +492,7 @@ class Installer:
                             if field == 'registration_owned': record['previous_registration'] = None
                         except (OSError, ValueError): rollback_error = True
                 if isinstance(exc, Cancelled):
-                    record['installed'] = bool(previous.get('installed'))
+                    record['installed'] = bool(previous.get('installed')) and not renewed
                     if not record['installed']: self.app.state.word_panels.clear()
                 # Rollback may have revoked the trust just verified above.
                 self.app.state.word_https_check = {}

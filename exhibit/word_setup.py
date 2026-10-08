@@ -76,13 +76,19 @@ def configure(root, cert, key, port):
     return root / 'BLExhibitManager.Word.xml'
 
 
-def prepare(root, http_port, port=None):
+def prepare(root, http_port, port=None, *, renew=False):
     with SETUP_LOCK:
         root.mkdir(parents=True, exist_ok=True)
         if (root / 'word-connection.json').exists():
             config, _ = configuration(root, http_port)
-            if not (root / 'BLExhibitManager.Word.xml').exists(): manifest(root, config['port'])
-            return
+            if not renew:
+                if not (root / 'BLExhibitManager.Word.xml').exists(): manifest(root, config['port'])
+                return
+            if not config.get('generated'):
+                raise ValueError('Прежний сертификат не создан приложением. Автоматическое обновление недоступно.')
+            port = config['port']
+        else:
+            renew = False
         automatic = port is None
         if automatic:
             port = 8769
@@ -92,14 +98,17 @@ def prepare(root, http_port, port=None):
             else:
                 raise ValueError('Укажите свободный HTTPS-порт от 1024 до 65535, отличный от порта приложения.')
         try:
-            with socket.socket() as probe:
-                try:
-                    probe.bind(('127.0.0.1', port))
-                except OSError:
-                    if not automatic:
-                        raise
-                    probe.bind(('127.0.0.1', 0))
-                port = probe.getsockname()[1]
+            # Keep the existing endpoint when renewing, even with an active owned
+            # listener. Old certificate/key files remain; new serials are unique.
+            if not renew:
+                with socket.socket() as probe:
+                    try:
+                        probe.bind(('127.0.0.1', port))
+                    except OSError:
+                        if not automatic:
+                            raise
+                        probe.bind(('127.0.0.1', 0))
+                    port = probe.getsockname()[1]
         except OSError as exc:
             if not automatic:
                 raise ValueError('HTTPS-порт занят. Выберите другой порт и повторите подготовку.') from exc

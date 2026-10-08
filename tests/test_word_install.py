@@ -123,6 +123,59 @@ class WordInstallTests(TestCase):
         self.assertEqual(self.finish(True)['phase'],'removed')
         self.assertTrue(self.settings.has_trust)
 
+    def test_windows_cache_only_import_renews_certificate_and_serving_tls_preserving_old_files(self):
+        word_setup.prepare(self.root,8765)
+        original_config,original_cert=word_setup.configuration(self.root)
+        original={Path(original_config[key]):Path(original_config[key]).read_bytes() for key in ('cert','key')}
+        self.assertTrue(word_tls.start_optional(self.app,self.root,8765))
+        self.settings.platform='win32'
+        attempts=[]
+        def import_root(cert,cancel):
+            attempts.append(cert)
+            if len(attempts)==2:self.settings.has_trust=self.settings.has_certificate=True
+            return True
+        with patch.object(self.settings,'install_trust',side_effect=import_root):
+            self.assertEqual(self.finish()['phase'],'waiting_word')
+        config,cert=word_setup.configuration(self.root)
+        self.assertEqual(len(attempts),2)
+        self.assertNotEqual(config['cert'],original_config['cert'])
+        self.assertEqual(config['port'],original_config['port'])
+        self.assertEqual({p:p.read_bytes() for p in original},original)
+        self.assertEqual(self.installer._record()['fingerprint'],cert.fingerprint(word_setup.hashes.SHA256()).hex())
+        # A real HTTPS request must see the new certificate, not the old listener.
+        self.assertEqual(word_setup.status(self.root,self.app,verify=True)['state'],'trusted')
+        self.assertTrue(Installer(self.root,self.app,self.settings).status()['installed'])
+
+    def test_windows_renewal_refusal_is_bounded_and_retry_uses_saved_new_certificate(self):
+        self.settings.platform='win32'; attempts=[]
+        def not_persisted(cert,cancel):attempts.append(cert);return True
+        with patch.object(self.settings,'install_trust',side_effect=not_persisted):
+            self.assertEqual(self.finish()['phase'],'error')
+        self.assertEqual(len(attempts),2)
+        self.assertFalse(self.installer._record()['installed'])
+        self.assertNotIn('register',self.settings.calls)
+        self.assertNotIn('open',self.settings.calls)
+        config,_=word_setup.configuration(self.root)
+        self.assertEqual(str(attempts[-1]),config['cert'])
+        self.assertEqual(self.finish()['phase'],'waiting_word')
+        self.assertEqual(word_setup.configuration(self.root)[0]['cert'],config['cert'])
+
+    def test_windows_cancel_after_renewal_revokes_only_new_trust_and_can_retry(self):
+        self.settings.platform='win32'; attempts=[]; removed=[]
+        def import_root(cert,cancel):
+            attempts.append(cert)
+            if len(attempts)==2:
+                self.settings.has_trust=self.settings.has_certificate=True
+                raise Cancelled()
+            return True
+        def revoke(cert):removed.append(cert);self.settings.has_trust=False
+        with patch.object(self.settings,'install_trust',side_effect=import_root),patch.object(self.settings,'remove_trust',side_effect=revoke):
+            self.assertEqual(self.finish()['phase'],'cancelled')
+        self.assertEqual(len(attempts),2)
+        self.assertEqual(removed,[attempts[-1]])
+        self.assertFalse(self.installer._record()['installed'])
+        self.assertEqual(self.finish()['phase'],'waiting_word')
+
     def test_denied_or_cancelled_setup_rolls_back_own_partial_changes_and_retries(self):
         for failure in ('cancel','partial'):
             self.settings.failure = failure

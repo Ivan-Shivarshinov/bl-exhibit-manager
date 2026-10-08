@@ -35,6 +35,9 @@ class SetupTests(TestCase):
         word_setup.prepare(other, 8765)
         self.assertEqual(before, (other/'word-connection.json').read_bytes())
         self.assertFalse(word_setup.status(other, self.app)['generated'])
+        with self.assertRaisesRegex(ValueError, 'не создан приложением'):
+            word_setup.prepare(other,8765,renew=True)
+        self.assertEqual(before,(other/'word-connection.json').read_bytes())
 
     def test_occupied_port_and_bad_config_preserved(self):
         with socket.socket() as s:
