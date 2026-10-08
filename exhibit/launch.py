@@ -48,9 +48,13 @@ def serve(port):
     word_server = start_word(app, ROOT, port)
     app.state.word_listener = word_server
     def stop_servers():
-        server.should_exit = True
         listener = app.state.word_listener
-        if listener: listener[0].should_exit = True
+        if listener:
+            listener[0].should_exit = True
+            # Keep the HTTP health endpoint alive until our TLS listener has
+            # released its port, so an immediate relaunch cannot race shutdown.
+            listener[1].join(timeout=5)
+        server.should_exit = True
     app.state.stop_server = stop_servers
     try: server.run()
     finally:
