@@ -447,9 +447,11 @@ class Installer:
                             raise
                         renewed = True
                         cert_path = Path(config['cert'])
-                        from . import word_tls
-                        if not word_tls.restart_optional(self.app, self.root, getattr(self.app.state, 'http_port', 8765)):
-                            raise ValueError('Не удалось обновить соединение панели. Повторите подключение; документы сохранены.')
+                    # Do not hold the setup lock while waiting for HTTP tasks in
+                    # the old listener: an in-flight diagnostic may need it.
+                    from . import word_tls
+                    if not word_tls.restart_optional(self.app, self.root, getattr(self.app.state, 'http_port', 8765)):
+                        raise ValueError('Не удалось обновить соединение панели. Повторите подключение; документы сохранены.')
                     self._check_cancel()
                     self._phase('system_confirmation', 'Подтвердите запрос системы для нового локального сертификата BL Exhibit Manager localhost. Можно отменить настройку.')
                     added = self.settings.install_trust(cert_path, self.cancel)

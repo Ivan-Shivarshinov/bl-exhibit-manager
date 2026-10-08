@@ -176,6 +176,34 @@ class WordInstallTests(TestCase):
         self.assertFalse(self.installer._record()['installed'])
         self.assertEqual(self.finish()['phase'],'waiting_word')
 
+    def test_tls_restart_completes_with_an_active_request_and_serves_health_again(self):
+        import asyncio,ssl,time
+        from urllib.request import urlopen
+        from urllib.error import URLError
+        started=threading.Event(); completed=threading.Event()
+        @self.app.get('/slow-word-request')
+        async def slow():
+            started.set()
+            await asyncio.sleep(30)
+            return {'done':True}
+        word_setup.prepare(self.root,8765)
+        config,_=word_setup.configuration(self.root)
+        context=ssl.create_default_context(cafile=config['cert'])
+        self.assertTrue(word_tls.start_optional(self.app,self.root,8765))
+        def request():
+            try:
+                with urlopen(f"https://localhost:{config['port']}/slow-word-request",context=context,timeout=8) as response:response.read()
+            except (URLError,OSError):pass
+            finally:completed.set()
+        client=threading.Thread(target=request,daemon=True);client.start()
+        self.assertTrue(started.wait(3))
+        before=time.monotonic()
+        self.assertTrue(word_tls.restart_optional(self.app,self.root,8765))
+        self.assertLess(time.monotonic()-before,5)
+        self.assertTrue(completed.wait(3));client.join(1)
+        with urlopen(f"https://localhost:{config['port']}/api/health",context=context,timeout=3) as response:
+            self.assertEqual(json.load(response)['application'],'bl-exhibit-manager')
+
     def test_denied_or_cancelled_setup_rolls_back_own_partial_changes_and_retries(self):
         for failure in ('cancel','partial'):
             self.settings.failure = failure

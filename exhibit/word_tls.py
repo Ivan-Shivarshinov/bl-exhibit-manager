@@ -50,7 +50,8 @@ def start(app, root, http_port):
     for key in ('cert', 'key'):
         if not Path(config[key]).is_file(): raise ValueError('Не найден сертификат Word. Повторите настройку подключения.')
     server = uvicorn.Server(uvicorn.Config(app, host='127.0.0.1', port=port,
-        ssl_certfile=config['cert'], ssl_keyfile=config['key'], access_log=False, log_level='warning', log_config=None))
+        ssl_certfile=config['cert'], ssl_keyfile=config['key'], access_log=False, log_level='warning', log_config=None,
+        timeout_graceful_shutdown=2))
     thread = threading.Thread(target=server.run, name='word-https', daemon=True)
     thread.start()
     deadline = time.monotonic() + 5
