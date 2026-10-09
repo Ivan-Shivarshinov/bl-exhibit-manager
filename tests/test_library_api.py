@@ -56,3 +56,18 @@ class LibraryAPI(TestCase):
         from exhibit.library import atomic_json
         token='1'*32;atomic_json(jobs.root/(token+'.json'),{'id':token,'state':'running'})
         reopened=Jobs(library);self.assertEqual(reopened.status(token)['state'],'interrupted')
+
+    def test_high_frequency_progress_is_bounded_and_terminal_status_remains_durable(self):
+        from exhibit.library import atomic_json
+        jobs=Jobs(Library(self.store))
+        def burst(cancel=lambda:False,progress=lambda *args:None):
+            for n in range(1000):progress(n,1000,'Проверяем')
+            return {'checked':1000}
+        jobs.actions['burst']=burst
+        with patch('exhibit.material_jobs.monotonic',return_value=1),patch('exhibit.material_jobs.atomic_json',wraps=atomic_json) as writes:
+            token=jobs.start('burst',{})['id']
+            while token in jobs.active:time.sleep(.01)
+            self.assertLess(writes.call_count,10)
+        state=Jobs(jobs.library).status(token)
+        self.assertEqual(state['state'],'complete');self.assertEqual(state['completed'],1000)
+        self.assertEqual(state['result'],{'checked':1000})

@@ -3,6 +3,7 @@ from threading import Thread, Event, RLock
 from uuid import uuid4
 from pathlib import Path
 import inspect
+from time import monotonic
 
 from .library import atomic_json, uid
 from .backup import json_data
@@ -38,10 +39,16 @@ class Jobs:
         token=uuid4().hex; stopped=Event()
         state={'id':token,'state':'queued','message':'Начинаем…','completed':0,'total':0}
         path=self.root/(token+'.json');atomic_json(path,state)
+        last_write=None
         def progress(done,total,message):
+            nonlocal last_write
             with self.lock:
                 state.update(state='running',completed=done,total=total,message=message)
-                atomic_json(path,state)
+                now=monotonic()
+                # Persist progress at most ten times a second, not once per archive member.
+                # The final result/cancellation is always flushed immediately below.
+                if last_write is None or now-last_write>=.1:
+                    atomic_json(path,state);last_write=now
         def work():
             try:
                 result=method(**arguments,cancel=stopped.is_set,progress=progress)
