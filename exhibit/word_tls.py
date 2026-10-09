@@ -10,8 +10,14 @@ import uvicorn
 def start_optional(app, root, http_port):
     """A broken add-in setup must not prevent ordinary document preparation."""
     app.state.word_connection = {'configured': False}
+    panels = getattr(app.state, 'word_panels', None)
+    if panels:
+        panels.clear()
+    app.state.word_https_check = {}
     try:
-        return start(app, root, http_port)
+        listener = start(app, root, http_port)
+        app.state.word_listener = listener
+        return listener
     except (ValueError, OSError, KeyError, TypeError):
         logging.getLogger(__name__).warning('Optional Word connection is unavailable', exc_info=True)
         app.state.word_connection = {
@@ -20,6 +26,18 @@ def start_optional(app, root, http_port):
                        'Можно продолжить работу через обычную загрузку DOCX и PDF.',
         }
         return None
+
+
+def restart_optional(app, root, http_port):
+    """Replace this application's TLS context after an owned certificate renewal."""
+    listener = getattr(app.state, 'word_listener', None)
+    if listener and listener[1].is_alive():
+        listener[0].should_exit = True
+        listener[1].join(timeout=5)
+        if listener[1].is_alive():
+            raise ValueError('Не удалось обновить соединение панели. Перезапустите приложение и повторите подключение; документы сохранены.')
+    app.state.word_listener = None
+    return start_optional(app, root, http_port)
 
 
 def start(app, root, http_port):
@@ -32,7 +50,8 @@ def start(app, root, http_port):
     for key in ('cert', 'key'):
         if not Path(config[key]).is_file(): raise ValueError('Не найден сертификат Word. Повторите настройку подключения.')
     server = uvicorn.Server(uvicorn.Config(app, host='127.0.0.1', port=port,
-        ssl_certfile=config['cert'], ssl_keyfile=config['key'], access_log=False, log_level='warning', log_config=None))
+        ssl_certfile=config['cert'], ssl_keyfile=config['key'], access_log=False, log_level='warning', log_config=None,
+        timeout_graceful_shutdown=2))
     thread = threading.Thread(target=server.run, name='word-https', daemon=True)
     thread.start()
     deadline = time.monotonic() + 5

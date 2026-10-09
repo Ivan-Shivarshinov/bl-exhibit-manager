@@ -6,6 +6,7 @@ import os
 import re
 import shutil
 import socket
+import ssl
 import subprocess
 import sys
 import tempfile
@@ -26,6 +27,11 @@ def main():
         exe=folder/('BLExhibitManager.exe' if os.name=='nt' else 'BLExhibitManager.app/Contents/MacOS/BLExhibitManager')
         data=root/'Isolated project data';cwd=root/'Empty working folder';cwd.mkdir()
         env=os.environ.copy();env['EXHIBIT_DATA_DIR']=str(data)
+        home=root/'Isolated user profile';home.mkdir()
+        env['HOME']=env['USERPROFILE']=str(home)
+        if os.name=='nt':
+            env['APPDATA']=str(home/'AppData/Roaming')
+            env['LOCALAPPDATA']=str(home/'AppData/Local')
         for name in ('PYTHONHOME','PYTHONPATH','VIRTUAL_ENV','CONDA_PREFIX'):env.pop(name,None)
         env['PATH']=str(Path(os.environ['SYSTEMROOT'])/'System32') if os.name=='nt' else '/usr/bin:/bin'
         with socket.socket() as sock:sock.bind(('127.0.0.1',0));port=sock.getsockname()[1]
@@ -48,12 +54,51 @@ def main():
                 raise AssertionError(f'{path}: HTTP {exc.code}: '+exc.read().decode(errors='replace')+'\n'+(log.read_text('utf-8',errors='replace')[-16000:] if log.exists() else 'No server log')) from exc
         try:
             command('--no-browser')
-            health=request('/api/health');assert health['version']=='0.3.0'
+            health=request('/api/health');assert health['version']=='0.4.0'
             html=request('/').decode();assert 'root' in html
             for asset in re.findall(r'(?:src|href)="(/assets/[^\"]+)"',html):assert len(request(asset))>100
             assert request('/api/word/status')['configured'] is False
             assert b'office.js' in request('/word/index.html')
             assert b'applyUpdates' in request('/word/office.js')
+            summary=request('/api/setup')
+            assert summary['components']['word']['state']=='not_configured'
+            assert summary['components']['claude']['state']=='unchecked'
+            for provider in ('claude','codex'):
+                assert request('/api/setup/check/'+provider,{})['state']=='missing'
+            with socket.socket() as sock:sock.bind(('127.0.0.1',0));tls_port=sock.getsockname()[1]
+            connected=request('/api/setup/word',{'port':tls_port})
+            assert connected['state']=='running',connected
+            assert request('/api/setup/check/word',{})['state']=='needs_trust'
+            certificate=request('/api/setup/word/certificate')
+            assert b'BEGIN CERTIFICATE' in certificate and b'PRIVATE KEY' not in certificate
+            context=ssl.create_default_context(cadata=certificate.decode())
+            with urlopen(f'https://localhost:{tls_port}/api/health',context=context,timeout=5) as response:
+                assert json.load(response)['version']=='0.4.0'
+            # Protocol smoke with an explicitly simulated Word host. This does
+            # not claim Office.js validation in a real Word application.
+            def panel(body):
+                req=Request(f'https://localhost:{tls_port}/api/word/connection',data=json.dumps(body).encode(),
+                    headers={'X-Exhibit-Local':'1','Content-Type':'application/json'})
+                with urlopen(req,context=context,timeout=5) as response:return json.load(response)
+            # Technical preparation alone does not finish native installation.
+            assert request('/api/setup')['components']['word']['panel']['state']=='setup_required'
+            token=panel({'action':'open','host':'Word','supported':True})['token']
+            assert request('/api/setup')['components']['word']['panel']['state']=='connected'
+            assert panel({'action':'ping','token':token})['active']
+            assert panel({'action':'close','token':token})['closed']
+            assert request('/api/setup')['components']['word']['panel']['state']=='disconnected'
+            token=panel({'action':'open','host':'Word','supported':False})['token']
+            assert request('/api/setup')['components']['word']['panel']['state']=='unsupported'
+            panel({'action':'close','token':token})
+            configured=(data/'word-connection.json').read_bytes()
+            command('--stop');command('--no-browser')
+            assert (data/'word-connection.json').read_bytes()==configured
+            assert request('/api/setup/word',{})['fingerprint']==connected['fingerprint']
+            assert request('/api/setup')['components']['word']['panel']['state']=='setup_required'
+            with urlopen(f'https://localhost:{tls_port}/api/health',context=context,timeout=5) as response:
+                assert json.load(response)['status']=='ok'
+            summary=request('/api/setup/report',{'word':{'state':'running','key':'PRIVATE'},'secret':{'state':'available'}})
+            assert 'PRIVATE' not in json.dumps(summary) and 'secret' not in summary['components']
             command('--no-browser') # Repeated start keeps the existing process/data.
             demo=request('/api/demo',{})
             doc=demo['documents'][0];pid=demo['id'];did=doc['id']
@@ -113,7 +158,7 @@ def main():
             (data/pid/f'translation-{did}.json').write_text(json.dumps(draft),'utf-8')
             token=request(f'/api/projects/{pid}/backup',{})['token']
             saved=request(f'/api/backups/{token}/download')
-            target=archive.stem.split('0.3.0-')[-1]
+            target=archive.stem.split('0.4.0-')[-1]
             outgoing=Path('output/backup-exchange')/target;outgoing.mkdir(parents=True,exist_ok=True)
             (outgoing/'project.zip').write_bytes(saved)
             check=request('/api/backups/preview',raw=saved);assert check['conflict'] and check['summary']['exports']==3
@@ -141,7 +186,7 @@ def main():
             after={str(p.relative_to(data)):p.read_bytes() for p in data.rglob('project.json')};assert before==after
             assert request(f'/api/projects/{pid}/exports/{first_export}')==package
             assert (folder/'LICENSE').is_file() and (folder/'THIRD-PARTY-NOTICES/PYTHON-LICENSE.txt').is_file()
-            print(json.dumps({'bundle':archive.name,'platform':sys.platform,'version':health['version'],'checks':['isolated start','static UI and optional Word pane assets','duplicate start','demo DOCX/PDF','PDFium rendering','structured extraction','PDF ZIP export','ready PDF upload and batch byte preservation','DOCX revisions without panel','immutable ZIP history','graceful stop','relocation and project persistence','licenses'],'result':'passed'}))
+            print(json.dumps({'bundle':archive.name,'platform':sys.platform,'version':health['version'],'checks':['isolated start','static UI and optional Word pane assets','panel presence protocol (simulated Word host)','duplicate start','demo DOCX/PDF','PDFium rendering','structured extraction','PDF ZIP export','ready PDF upload and batch byte preservation','DOCX revisions without panel','immutable ZIP history','graceful stop','relocation and project persistence','licenses'],'result':'passed'}))
         finally:
             command('--stop')
 

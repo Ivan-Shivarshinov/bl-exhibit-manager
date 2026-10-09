@@ -1,4 +1,5 @@
 import {insertCitation, inspectUpdates, applyUpdates, currentDocx} from './office.js';
+import {startWordConnection} from './connection.js';
 
 const $ = id => document.getElementById(id);
 let catalog = null, selected = '', plan = null, busy = false;
@@ -44,6 +45,7 @@ async function loadProject() {
   catalog=id?await api('/word/projects/'+id):null;
   if(catalog)$('form').value=catalog.style.name_form;
   render();
+  $('status').textContent=catalog?`Подача «${catalog.name}» открыта. Выберите приложение для сноски.`:'Подключено к Word. Выберите подачу.';
 }
 async function refresh() {
   const prior=$('project').value, projects=await api('/projects');
@@ -82,8 +84,21 @@ $('send').onclick=()=>run(async()=>{
   catalog=await api('/word/projects/'+catalog.id);
   $('status').textContent='Редакция передана. Откройте подачу, проверьте сопоставления и соберите комплект.';
 });
-if(!globalThis.Office) { $('status').textContent='Панель открывается как надстройка в Microsoft Word. Настройте подключение по инструкции проекта.'; }
-else Office.onReady(info=>{
-  if(info.host!==Office.HostType.Word || !Office.context.requirements.isSetSupported('WordApi','1.5')){ $('status').textContent='Нужен Microsoft Word с поддержкой WordApi 1.5. Обновите Microsoft 365.';return; }
+function outsideWord() {
+  $('status').textContent='Страница панели открыта в браузере. В приложении выберите «Помощь и настройка» → «Подключить панель». Сноски создаются внутри Word.';
+}
+if(!globalThis.Office) { outsideWord(); }
+else Office.onReady(async info=>{
+  if(info.host!==Office.HostType.Word){ outsideWord();return; }
+  const supported=Office.context.requirements.isSetSupported('WordApi','1.5');
+  if(!supported) $('status').textContent='Нужен Word с поддержкой WordApi 1.5, например Microsoft 365 или Office 2024. Проверьте доступные обновления вашей редакции Word.';
+  try {
+    const stop=await startWordConnection(info, {
+      onError:message=>{$('connection-error').textContent=message;$('connection-error').hidden=false;},
+      onReady:()=>{$('connection-error').hidden=true;},
+    });
+    window.addEventListener('pagehide', stop, {once:true});
+  } catch { $('status').textContent='Word не подтвердил готовность панели. Закройте и снова откройте панель; обычная работа в приложении доступна.';return; }
+  if(!supported)return;
   $('workspace').hidden=false;$('status').textContent='Подключено к Word. Выберите подачу.';run(refresh);
 });

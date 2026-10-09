@@ -44,15 +44,23 @@ def serve(port):
                         format="%(asctime)s %(name)s %(levelname)s %(message)s")
     server=uvicorn.Server(uvicorn.Config(app,host="127.0.0.1",port=port,access_log=False,log_level="warning",log_config=None))
     from .word_tls import start_optional as start_word
+    app.state.http_port = port
     word_server = start_word(app, ROOT, port)
+    app.state.word_listener = word_server
     def stop_servers():
+        listener = app.state.word_listener
+        if listener:
+            listener[0].should_exit = True
+            # Keep the HTTP health endpoint alive until our TLS listener has
+            # released its port, so an immediate relaunch cannot race shutdown.
+            listener[1].join(timeout=5)
         server.should_exit = True
-        if word_server: word_server[0].should_exit = True
     app.state.stop_server = stop_servers
     try: server.run()
     finally:
         stop_servers()
-        if word_server: word_server[1].join(timeout=5)
+        listener = app.state.word_listener
+        if listener: listener[1].join(timeout=5)
 
 
 def stop(port):
@@ -125,7 +133,14 @@ def main():
     parser.add_argument("--no-browser",action="store_true")
     parser.add_argument("--quiet",action="store_true")
     group=parser.add_mutually_exclusive_group();group.add_argument("--serve",action="store_true");group.add_argument("--stop",action="store_true")
+    group.add_argument("--windows-root-add", nargs=2, help=argparse.SUPPRESS)
+    parser.add_argument("--windows-root-machine", action="store_true", help=argparse.SUPPRESS)
+    parser.add_argument("--windows-root-store", default="Root", help=argparse.SUPPRESS)
     args=parser.parse_args()
+    if args.windows_root_add:
+        if sys.platform != 'win32': return 1
+        from .windows_certificates import add_worker
+        return add_worker(*args.windows_root_add, admin=args.windows_root_machine, store=args.windows_root_store)
     if not 1024<=args.port<=65535:parser.error("Port must be between 1024 and 65535")
     try:
         if args.serve:serve(args.port)

@@ -1,0 +1,21 @@
+/* Shared application and Word-pane palette. Document rendering is independent. */
+:root {
+  color-scheme: light;
+  --header: #001831;
+  --accent: #122a4b;
+  --accent-hover: #0b203c;
+  --ink: #010b13;
+  --link: #3c69e7;
+  --surface: #fff;
+  --canvas: #f7f9ff;
+  --muted: #596579;
+  --line: #dce3ee;
+  --control-line: #8793a5;
+  --pale: #eef2fc;
+  --success: #306b40;
+  --success-bg: #edf6ed;
+  --warning: #8a561b;
+  --warning-bg: #fff4e5;
+  --danger: #a33125;
+  --danger-bg: #fff0ed;
+}

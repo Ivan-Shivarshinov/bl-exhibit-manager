@@ -1,0 +1,56 @@
+from pathlib import Path
+import os
+import ssl
+import sys
+from tempfile import TemporaryDirectory
+from unittest import TestCase, skipUnless
+import uuid
+
+from exhibit import launch, word_setup, windows_certificates
+from exhibit.word_install import NativeSettings
+
+
+@skipUnless(sys.platform == 'win32', 'Windows system-store API')
+class WindowsCertificatesTests(TestCase):
+    def test_exact_deletion_repeat_and_reinstall_preserve_other_roots_and_same_name_certificate(self):
+        import winreg
+        with TemporaryDirectory() as folder:
+            base=Path(folder); store='BLExhibit-test-'+uuid.uuid4().hex
+            before=ssl.enum_certificates('ROOT')
+            tool=str(Path(os.environ['SYSTEMROOT'])/'System32/certutil.exe')
+            settings=NativeSettings()
+            for name in ('one','two'):word_setup.prepare(base/name,8765)
+            paths=[Path(word_setup.configuration(base/name)[0]['cert']) for name in ('one','two')]
+            ders=[word_setup.configuration(base/name)[1].public_bytes(word_setup.serialization.Encoding.DER) for name in ('one','two')]
+            try:
+                # Create only a unique non-trusting test store, then exercise the
+                # same protected-provider API used by the real installer.
+                settings.run([tool,'-user','-f','-addstore',store,str(paths[0])],timeout=10)
+                windows_certificates.remove(ders[0],store=store)
+                self.assertTrue(windows_certificates.add(ders[0],store=store))
+                self.assertTrue(windows_certificates.add(ders[1],store=store))
+                self.assertFalse(windows_certificates.add(ders[0],store=store))
+                self.assertEqual({c[0] for c in ssl.enum_certificates(store)},set(ders))
+                self.assertTrue(windows_certificates.remove(ders[0],store=store))
+                self.assertEqual({c[0] for c in ssl.enum_certificates(store)},{ders[1]})
+                self.assertFalse(windows_certificates.remove(ders[0],store=store))
+                result=base/'worker-result.json'
+                code,_=settings.run(launch.command('--windows-root-add',str(paths[0]),str(result),'--windows-root-store',store),timeout=20)
+                import json
+                self.assertEqual(code,0)
+                self.assertEqual(json.loads(result.read_text()),{'added':True})
+                self.assertEqual({c[0] for c in ssl.enum_certificates(store)},set(ders))
+                self.assertTrue(windows_certificates.remove(ders[0],store=store))
+                self.assertEqual({c[0] for c in ssl.enum_certificates('ROOT')},{c[0] for c in before})
+            finally:
+                for der in ders:windows_certificates.remove(der,store=store)
+                prefix='Software\\Microsoft\\SystemCertificates\\'+store
+                # Only the unique non-trusting store created above is removed.
+                def cleanup(path):
+                    try:
+                        with winreg.OpenKey(winreg.HKEY_CURRENT_USER,path) as key:
+                            children=[winreg.EnumKey(key,i) for i in range(winreg.QueryInfoKey(key)[0])]
+                        for child in children:cleanup(path+'\\'+child)
+                        winreg.DeleteKey(winreg.HKEY_CURRENT_USER,path)
+                    except FileNotFoundError:pass
+                cleanup(prefix)
