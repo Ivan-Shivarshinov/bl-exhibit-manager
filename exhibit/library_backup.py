@@ -95,7 +95,7 @@ def save(library,lid,destination,cancel=lambda:False,progress=lambda *args:None)
         lib=library.load(lid);lib['operations']={};members={'library.json':json.dumps(lib,ensure_ascii=False).encode()}
         for mid,card in lib['materials'].items():
             for vid in card['versions']:
-                v=library.version(lid,mid,vid)
+                v=library.version(lid,mid,vid,_catalog=lib)
                 members[f'versions/{vid}.json']=library.folder(lid)/'versions'/f'{vid}.json'
                 for p in v['parts'].values(): members['blobs/'+p['blob']]=library.part(lid,p)
         if len(members)>MAX_FILES or sum(len(v) if isinstance(v,bytes) else v.stat().st_size for v in members.values())>MAX_BYTES:

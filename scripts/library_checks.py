@@ -153,6 +153,11 @@ def load_check(request,data,output):
             assert state['state'] not in ('error','cancelled','interrupted'),state;sleep(.05)
     preview,feedback=op('upload_preview',{'lid':lid,'rows':rows});assert not preview['errors']
     published,_=op('publish',{'token':preview['token']});assert len(published['materials'])==100
-    report={'platform':platform.platform(),'catalog_materials':1000,'versions':3000,'first_page_seconds':first,'warm_search_p95_seconds':p95,'operation_feedback_seconds':feedback,'scan_bytes':len(scan),'bulk_pdf_count':100,'result':'passed'}
+    archived,_=op('archive_save',{'lid':lid});assert archived['summary']['versions']==3100
+    checked,_=op('archive_preview',{'token':archived['token']});assert checked['conflict']
+    restored,_=op('archive_restore',{'token':archived['token'],'copy':True})
+    assert restored['id']!=lid and restored['summary']==archived['summary']
+    assert request(f"/api/libraries/{restored['id']}/materials")['total']==1100
+    report={'platform':platform.platform(),'catalog_materials':1000,'versions':3000,'first_page_seconds':first,'warm_search_p95_seconds':p95,'operation_feedback_seconds':feedback,'scan_bytes':len(scan),'bulk_pdf_count':100,'archive_restored_versions':3100,'result':'passed'}
     Path(output).mkdir(parents=True,exist_ok=True);(Path(output)/'library-load.json').write_text(json.dumps(report,indent=2),'utf-8')
     return report

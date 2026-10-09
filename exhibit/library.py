@@ -180,8 +180,9 @@ class Library:
         rows.sort(key=lambda x: x['latest']['created_at'] if sort == 'date' else x['latest']['metadata']['title'].casefold(), reverse=sort == 'date')
         return {'library': {k:lib[k] for k in ('id','name','revision')}, 'total':len(rows), 'items':rows[offset:offset+limit]}
 
-    def version(self, lid, mid, vid=None, verify=False):
-        lib = self.load(lid); item = lib['materials'].get(uid(mid))
+    def version(self, lid, mid, vid=None, verify=False, _catalog=None):
+        # Archive uses its already locked snapshot, avoiding one full index copy per version.
+        lib = self.load(lid) if _catalog is None else _catalog; item = lib['materials'].get(uid(mid))
         if not item: raise ValueError('Материал не найден.')
         vid = uid(vid or item['versions'][-1])
         if vid not in item['versions']: raise ValueError('Версия не принадлежит выбранному материалу.')

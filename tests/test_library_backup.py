@@ -27,7 +27,11 @@ class ArchiveTests(TestCase):
         return result
 
     def test_all_versions_identity_copy_conflict_and_independent_project(self):
-        result=self.archive();checked=library_backup.inspect(self.path)
+        result=self.archive()
+        with patch.object(self.library,'load',wraps=self.library.load) as loads:
+            library_backup.save(self.library,self.lib['id'],self.store.root/'snapshot.zip')
+            self.assertEqual(loads.call_count,1)
+        checked=library_backup.inspect(self.path)
         self.assertEqual(checked['summary']['versions'],2)
         self.assertEqual(checked['library']['operations'],{})
         with TemporaryDirectory() as tmp:
