@@ -341,7 +341,8 @@ class Library:
                 v=deepcopy(row['version']);decision=decisions.get(v['id'])
                 matches=[plan['matches'][key] for key in row['duplicates']+row.get('related',[])]
                 if not decision:
-                    if row['duplicates'] and not row['allow_duplicate']: raise ValueError('Выберите явное решение для точного дубликата.')
+                    if (row['duplicates'] or row.get('related') and not v['parent']) and not row['allow_duplicate']:
+                        raise ValueError('Выберите явное решение для совпадения содержания.')
                     decision={'action':'version' if v['parent'] else 'separate'}
                 if not isinstance(decision,dict) or decision.get('action') not in ('reuse','version','separate'):
                     raise ValueError('Выберите использование материала, новую версию или отдельный материал.')

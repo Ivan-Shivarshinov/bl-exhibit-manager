@@ -1,6 +1,6 @@
 import React,{useEffect,useState} from 'react';
 
-export const unresolvedDuplicates=(rows,decisions)=>rows.some(r=>r.duplicates.length&&!r.allow_duplicate&&!decisions[r.version.id]);
+export const unresolvedDuplicates=(rows,decisions)=>rows.some(r=>(r.duplicates.length||(r.related?.length&&!r.version.parent))&&!r.allow_duplicate&&!decisions[r.version.id]);
 
 export default function LibraryDuplicates({api,plan,decisions,onChange,onView,blocked}) {
   const [preview,setPreview]=useState(null),[limits,setLimits]=useState({});
@@ -17,7 +17,7 @@ export default function LibraryDuplicates({api,plan,decisions,onChange,onView,bl
     const matches=[...row.duplicates,...(row.related||[])].map(key=>plan.matches[key]),decision=decisions[row.version.id];
     return <li key={row.version.id} className="duplicate-row"><b>{row.version.metadata.title}</b> · {Object.keys(row.version.parts).map(k=>({original:'Оригинал',translation:'Подтверждённый перевод',ready:'Готовый PDF'})[k]).join(', ')}
       {matches.length>0&&<><p className="pending">{row.duplicates.length?'Найдено полное совпадение содержания. Выберите действие для этой строки.':'Совпадает оригинал, но состав перевода отличается. Это не полное совпадение.'}</p>
-        <ul>{matches.slice(0,limits[row.version.id]||10).map(match=><li key={match.version_id} className="duplicate-match"><b>«{match.title}» · версия {match.version_number}{match.batch?' · в этой загрузке':''}{match.hidden?' · скрытый материал':''}</b><p>{match.kind==='exact'?'Полное совпадение оригинала и перевода / готового PDF.':'Одинаковый оригинал, другой перевод или состав частей.'}</p><div className="actions">
+        <ul>{matches.slice(0,limits[row.version.id]||10).map(match=><li key={match.version_id} className="duplicate-match"><b>«{match.title}» · {match.batch?'в этой загрузке':`версия ${match.version_number}`}{match.hidden?' · скрытый материал':''}</b><p>{match.kind==='exact'?'Полное совпадение состава и байтов файлов.':'Одинаковый оригинал, другой перевод или состав частей.'}</p><div className="actions">
           <button disabled={blocked} onClick={()=>view(match)}>Посмотреть совпавшую версию</button>
           {match.kind==='exact'&&<button disabled={blocked} aria-pressed={decision?.action==='reuse'&&decision.version_id===match.version_id} onClick={()=>decide(row,'reuse',match)}>Использовать существующий материал</button>}
           <button disabled={blocked} aria-pressed={decision?.action==='version'&&decision.version_id===match.version_id} onClick={()=>decide(row,'version',match)}>Сохранить новую версию этого материала</button>

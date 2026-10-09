@@ -79,6 +79,7 @@ class HistoricalDuplicates(TestCase):
         v1,_=self.history();row=self.uploaded('Only original.pdf',self.original)
         plan=self.library.upload_preview(self.lib['id'],[row]);r=plan['rows'][0]
         self.assertFalse(r['duplicates']);self.assertTrue(r['related'])
+        with self.assertRaisesRegex(ValueError,'явное решение'):self.library.publish(plan['token'])
         with self.assertRaisesRegex(ValueError,'полным совпадением'):
             self.library.publish(plan['token'],decisions={r['version']['id']:{'action':'reuse','version_id':v1['version_id']}})
         self.library.publish(self.library.upload_preview(self.lib['id'],[self.uploaded('Distinct.pdf',self.translation)])['token'])
