@@ -1,5 +1,6 @@
 """Loopback UI. Translation uses the user's official CLI; credentials stay with that CLI."""
 from pathlib import Path
+from threading import RLock
 import logging
 from urllib.parse import urlparse
 from fastapi import FastAPI, Request, BackgroundTasks
@@ -36,6 +37,10 @@ def stop_application(background: BackgroundTasks):
     with LOCK:
         if translations.active:
             raise ValueError("Сначала дождитесь перевода или остановите его в окне переводчика. Готовые части сохранены.")
+    if getattr(app.state,'material_store',None) is store:
+        with app.state.material_jobs.lock:
+            if app.state.material_jobs.active:
+                raise ValueError('Дождитесь операции библиотеки или отмените её перед остановкой приложения.')
     background.add_task(stop)
     return {"stopping": True}
 
@@ -499,6 +504,118 @@ def setup_certificate():
     if config.get('generated') is not True:
         raise ValueError('Для прежнего сертификата используйте инструкцию его поставщика.')
     return FileResponse(config['cert'], media_type='application/x-x509-ca-cert', filename='BL-Exhibit-localhost.crt')
+
+
+MATERIAL_SERVICES_LOCK=RLock()
+
+
+def material_services():
+    from .library import Library
+    from .material_jobs import Jobs
+    with MATERIAL_SERVICES_LOCK:
+        if getattr(app.state,'material_store',None) is not store:
+            app.state.material_library=Library(store)
+            app.state.material_jobs=Jobs(app.state.material_library)
+            app.state.material_store=store
+        return app.state.material_library, app.state.material_jobs
+
+
+@app.get('/api/libraries')
+def list_libraries():
+    return material_services()[0].list()
+
+
+@app.post('/api/libraries')
+async def create_library(request: Request):
+    body=await request.json()
+    return await run_in_threadpool(material_services()[0].create,body.get('name'))
+
+
+@app.get('/api/libraries/{lid}/materials')
+def library_catalog(lid: str, request: Request, q: str='', offset: int=0, limit: int=50, sort: str='title'):
+    return material_services()[0].catalog(lid,q,offset,limit,sort,**{k:request.query_params.get(k) for k in ('category','language','document_date','tag','translation','hidden')})
+
+
+@app.get('/api/libraries/{lid}/materials/{mid}/versions/{vid}')
+def material_version(lid: str, mid: str, vid: str):
+    return material_services()[0].version(lid,mid,vid)
+
+
+@app.get('/api/projects/{pid}/library-status')
+def library_status(pid: str):
+    return material_services()[0].notifications(pid)
+
+
+@app.get('/api/libraries/{lid}/materials/{mid}/versions/{vid}/preview')
+def material_page(lid: str, mid: str, vid: str, role: str='original', page: int=1, scale: float=1.2):
+    return Response(material_services()[0].preview_page(lid,mid,vid,role,page,scale),media_type='image/png')
+
+
+@app.post('/api/material-operations')
+async def material_operation(request: Request):
+    body=await request.json()
+    return material_services()[1].start(body.get('action'),body.get('arguments'))
+
+
+@app.get('/api/material-operations/{token}')
+def material_operation_status(token: str):
+    return material_services()[1].status(token)
+
+
+@app.post('/api/material-operations/{token}/cancel')
+def material_operation_cancel(token: str):
+    return material_services()[1].cancel(token)
+
+
+@app.post('/api/library-files')
+async def library_file_upload(request: Request, name: str, archive: bool=False):
+    lib,_=material_services();folder=lib.pending();size=0
+    limit=backup.MAX_BYTES if archive else backup.MAX_INPUT
+    path=folder/('library.zip' if archive else 'upload.pdf')
+    try:
+        with path.open('xb') as stream:
+            async for chunk in request.stream():
+                size+=len(chunk)
+                if size>limit: raise ValueError('Файл превышает допустимый размер: 8 ГБ для архива, 50 МБ для PDF.')
+                stream.write(chunk)
+        if not size: raise ValueError('Выберите непустой файл.')
+        if archive: return {'token':folder.name}
+        if not name.lower().endswith('.pdf'): raise ValueError('Выберите PDF.')
+        part=await run_in_threadpool(lib.stage_part,folder,name,path.read_bytes())
+        from .library import atomic_json
+        atomic_json(folder/'part.json',part)
+        path.unlink()
+        return {'token':folder.name,'part':part}
+    except Exception:
+        shutil.rmtree(folder,ignore_errors=True);raise
+
+
+@app.get('/api/library-archives/{token}/download')
+def library_archive_download(token: str):
+    folder=material_services()[0].pending(token);path=folder/'library.zip'
+    if not path.is_file(): raise ValueError('Архив библиотеки ещё не готов.')
+    return FileResponse(path,media_type='application/zip',filename='Exhibit-library.zip')
+
+
+@app.get('/api/library-files/{token}/preview')
+def uploaded_library_page(token: str, page: int=1):
+    lib,_=material_services();folder=lib.pending(token)
+    from .backup import json_data
+    part=json_data((folder/'part.json').read_bytes())
+    with (folder/part['blob']).open('rb') as f:
+        if backup.hash_stream(f)!={k:part[k] for k in ('size','sha256')}: raise ValueError('Загруженный PDF повреждён.')
+    return Response(pdf.render_png((folder/part['blob']).read_bytes(),page,1.2),media_type='image/png')
+
+
+@app.post('/api/libraries/{lid}/materials/{mid}/hidden')
+async def material_hidden(lid: str, mid: str, request: Request):
+    body=await request.json()
+    return await run_in_threadpool(material_services()[0].hide,lid,mid,body.get('hidden'),body.get('revision'))
+
+
+@app.get('/api/libraries/{lid}/materials/{mid}/usage')
+def material_usage(lid: str, mid: str):
+    return material_services()[0].usage(lid,mid)
 
 
 DIST = Path(__file__).resolve().parent.parent / "web" / "dist"
