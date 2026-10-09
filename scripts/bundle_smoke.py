@@ -181,7 +181,9 @@ def main():
                     print('BACKUP_EXCHANGE_OK='+str(source_archive))
             from library_checks import verify as library_verify,load_check
             library_verify(request,data,outgoing,Path(sys.argv[2]) if len(sys.argv)>2 else Path('output/legacy-archives'))
-            load_check(request,data,outgoing)
+            # Native builds already measure this exact package. The exchange host
+            # deliberately has no source/build dependencies: exercise only its EXE/app.
+            if len(sys.argv)==2:load_check(request,data,outgoing)
             if os.environ.get('EXHIBIT_BROWSER_QA')=='1':
                 from exhibit.samples import make_pdf
                 fixtures=outgoing/'fixtures';fixtures.mkdir(exist_ok=True)

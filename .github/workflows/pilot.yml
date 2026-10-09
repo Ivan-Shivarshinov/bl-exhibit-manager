@@ -78,6 +78,9 @@ jobs:
       - name: Verify bitmap images, TOC and relative links in LibreOffice PDF
         if: runner.os == 'macOS'
         run: python scripts/verify_office_images.py --output output/feedback-office/images
+      - name: Verify library import and rename with real LibreOffice
+        if: runner.os == 'macOS'
+        run: python scripts/verify_library_office.py --output output/feedback-office/library
       - name: Verify DOCX revisions and immutable history without Word pane
         if: runner.os == 'macOS'
         run: python scripts/verify_revisions_office.py --output output/feedback-office/revisions

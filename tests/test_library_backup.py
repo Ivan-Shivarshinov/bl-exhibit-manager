@@ -33,7 +33,7 @@ class ArchiveTests(TestCase):
         with TemporaryDirectory() as tmp:
             target=Library(Store(tmp));restored=library_backup.restore(target,self.path)
             self.assertEqual(restored['id'],self.lib['id'])
-            self.assertEqual(digest(target.version(**{'lid':self.v1['library_id'],'mid':self.v1['material_id'],'vid':self.v1['version_id']})),digest(checked['versions'][self.v1['version_id']]))
+            self.assertEqual(digest(target.version(**{'lid':self.v1['library_id'],'mid':self.v1['material_id'],'vid':self.v1['version_id']})),digest(self.library.version(self.lib['id'],self.v1['material_id'],self.v1['version_id'])))
             with self.assertRaises(ValueError):library_backup.restore(target,self.path)
             copied=library_backup.restore(target,self.path,copy=True)
             self.assertNotEqual(copied['id'],self.lib['id'])
@@ -85,3 +85,24 @@ class ArchiveTests(TestCase):
                 else:
                     info=ZipInfo('blobs/'+('a'*64)+'.pdf');info.external_attr=(stat.S_IFLNK|0o777)<<16;z.writestr(info,b'/private')
             with self.assertRaises(ValueError):library_backup.inspect(path)
+
+    def test_valid_checksums_do_not_allow_forged_pdf_metadata_and_limits(self):
+        self.archive()
+        with ZipFile(self.path) as z: contents={i.filename:z.read(i) for i in z.infolist()}
+        name='versions/'+self.v1['version_id']+'.json'
+        version=json.loads(contents[name]);version['parts']['original']['sizes'][0][0]+=10
+        contents[name]=json.dumps(version).encode()
+        manifest=json.loads(contents['backup.json'])
+        from hashlib import sha256
+        manifest['files'][name]={'sha256':sha256(contents[name]).hexdigest(),'size':len(contents[name])}
+        contents['backup.json']=json.dumps(manifest).encode()
+        forged=self.store.root/'forged.zip'
+        with ZipFile(forged,'w') as z:
+            for k,v in contents.items():z.writestr(k,v)
+        with self.assertRaisesRegex(ValueError,'страницах'):library_backup.inspect(forged)
+        for limit in ('MAX_BYTES','MAX_FILES','MAX_JSON','MAX_INPUT'):
+            with patch('exhibit.library_backup.'+limit,1),self.subTest(limit=limit),self.assertRaises(ValueError):library_backup.inspect(self.path)
+        # Deterministic copy retries compare one manifest at a time and retain IDs.
+        with TemporaryDirectory() as tmp:
+            target=Library(Store(tmp));first=library_backup.restore(target,self.path,copy=True,identity_seed='retry')
+            self.assertEqual(first,library_backup.restore(target,self.path,copy=True,identity_seed='retry'))

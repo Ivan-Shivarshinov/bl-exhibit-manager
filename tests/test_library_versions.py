@@ -101,5 +101,3 @@ class VersionTests(TestCase):
         v=self.library.version(v1['library_id'],v1['material_id'],v2['version_id'])
         (self.library.folder(v1['library_id'])/'blobs'/v['parts']['original']['blob']).write_bytes(b'bad')
         with self.assertRaises(ValueError):self.library.compare(v1['library_id'],v1['material_id'],v1['version_id'],v2['version_id'])
-
-

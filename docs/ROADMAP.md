@@ -58,7 +58,7 @@
 
 ## Подробный следующий этап — библиотека материалов дела
 
-План уточнён 9 октября; [proposal](../openspec/changes/case-material-library/proposal.md), [сценарии](../openspec/changes/case-material-library/specs/case-materials/spec.md), [design](../openspec/changes/case-material-library/design.md), [задачи](../openspec/changes/case-material-library/tasks.md). Реализация не начата. Пользователь 9 октября принял весь план, включая R1–R4, для полноценного релиза 0.5.0; реализация не начата.
+План уточнён 9 октября; [proposal](../openspec/changes/case-material-library/proposal.md), [сценарии](../openspec/changes/case-material-library/specs/case-materials/spec.md), [design](../openspec/changes/case-material-library/design.md), [задачи](../openspec/changes/case-material-library/tasks.md). Пользователь 9 октября принял весь план, включая R1–R4, для полноценного релиза 0.5.0. Реализация и проверка сценариев из исходников выполнены; идёт итоговая проверка нативных пакетов и обмена архивами. GitHub Release не опубликован.
 
 Порядок: безопасное хранение → каталог и сохранение материала → независимый импорт и готовая подача → версии и сравнение → явное обновление с сохранением местных правок → архив/перенос → принятые расширения → проверка готовых пакетов. Первый демонстрируемый результат — материал с переводом повторно используется в другой подаче с новым номером без нового перевода. Полный критерий — две независимые подачи на разных версиях и перенос без библиотеки.
 

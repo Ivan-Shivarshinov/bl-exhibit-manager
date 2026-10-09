@@ -15,7 +15,7 @@ from hashlib import sha256
 
 from .backup import MAX_BYTES, MAX_FILES, MAX_JSON, MAX_INPUT, CHUNK, json_data,hash_stream,io_errors
 from .library import SCHEMA,uid,metadata,check_version,atomic_json
-from .project import LOCK
+from .project import LOCK, digest
 
 MEMBER=re.compile(r'library.json|versions/[a-f0-9]{32}\.json|blobs/[a-f0-9]{64}\.pdf')
 
@@ -58,7 +58,7 @@ def inspect(path, cancel=lambda:False, progress=lambda *args:None):
             if type(lib.get('schema')) is not int or lib['schema']!=SCHEMA: raise ValueError('Схема библиотеки не поддерживается.')
             uid(lib['id']);metadata({'title':lib['name']})
             if type(lib.get('revision')) is not int or not isinstance(lib.get('materials'),dict) or lib.get('operations')!={}: raise ValueError('Неполные сведения библиотеки.')
-            required={'library.json'};versions={}
+            required={'library.json'};versions=set();pdf_info={}
             for mid,card in lib['materials'].items():
                 uid(mid)
                 if card['id']!=mid or type(card['hidden']) is not bool or not card['versions'] or len(set(card['versions']))!=len(card['versions']): raise ValueError('Повреждён список версий материала.')
@@ -68,13 +68,18 @@ def inspect(path, cancel=lambda:False, progress=lambda *args:None):
                     if vid in versions: raise ValueError('Версия повторяется в другом материале.')
                     v=check_version(json_data(z.read(name)))
                     if (v['id'],v['material_id'],v['library_id'],v['parent'])!=(vid,mid,lib['id'],parent): raise ValueError('Нарушена идентичность или порядок версий.')
-                    parent=vid;versions[vid]=v
+                    parent=vid;versions.add(vid)
                     for part in v['parts'].values():
                         name='blobs/'+part['blob'];required.add(name)
                         if files.get(name)!={k:part[k] for k in ('sha256','size')}: raise ValueError('Отсутствует обязательная часть версии.')
-                if card['latest']!=summary(versions[parent]): raise ValueError('Каталог не соответствует последней версии.')
+                        if name not in pdf_info:
+                            if cancel(): raise ValueError('Проверка архива отменена.')
+                            from .pdf import inspect_pdf
+                            pdf_info[name]=digest(inspect_pdf(z.read(name)))
+                        if digest({k:part.get(k) for k in ('pages','sizes','text_pages')})!=pdf_info[name]: raise ValueError('Сведения о страницах не соответствуют PDF в архиве.')
+                if card['latest']!=summary(v): raise ValueError('Каталог не соответствует последней версии.')
             if required!=set(files): raise ValueError('В архиве есть посторонние или отсутствующие обязательные файлы.')
-            return {'library':lib,'versions':versions,'files':files,'summary':{'materials':len(lib['materials']),'versions':len(versions),'files':len(files),'bytes':total},'created_at':manifest.get('created_at')}
+            return {'library':lib,'versions':sorted(versions),'files':files,'summary':{'materials':len(lib['materials']),'versions':len(versions),'files':len(files),'bytes':total},'created_at':manifest.get('created_at')}
     except (BadZipFile,EOFError,RuntimeError,NotImplementedError,KeyError,TypeError,AttributeError,RecursionError) as exc:
         raise ValueError('Архив библиотеки повреждён или имеет неподдерживаемую структуру.') from exc
 
@@ -91,7 +96,7 @@ def save(library,lid,destination,cancel=lambda:False,progress=lambda *args:None)
         for mid,card in lib['materials'].items():
             for vid in card['versions']:
                 v=library.version(lid,mid,vid)
-                members[f'versions/{vid}.json']=json.dumps(v,ensure_ascii=False).encode()
+                members[f'versions/{vid}.json']=library.folder(lid)/'versions'/f'{vid}.json'
                 for p in v['parts'].values(): members['blobs/'+p['blob']]=library.part(lid,p)
         if len(members)>MAX_FILES or sum(len(v) if isinstance(v,bytes) else v.stat().st_size for v in members.values())>MAX_BYTES:
             raise ValueError('Библиотека превышает предел архива: 8 ГБ или 20 000 файлов.')
@@ -115,18 +120,25 @@ def restore(library,path,copy=False,cancel=lambda:False,progress=lambda *args:No
         checked=inspect(path,cancel,progress);lib=deepcopy(checked['library'])
         if library.folder(lib['id']).exists() and not copy: raise ValueError('Библиотека уже существует. Отмените действие или восстановите независимую копию.')
         if shutil.disk_usage(library.store.root).free<checked['summary']['bytes']+16_000_000: raise ValueError('Недостаточно места для восстановления библиотеки.')
-        versions=deepcopy(checked['versions'])
+        versions=checked['versions']
+        def mapped(v):
+            if not copy: return v
+            return {**v,'id':vids[v['id']],'material_id':mids[v['material_id']],'library_id':lib['id'],'parent':vids[v['parent']] if v['parent'] else None}
+        def read_version(z,vid):
+            name=f'versions/{vid}.json';data=z.read(name)
+            if {'sha256':sha256(data).hexdigest(),'size':len(data)}!=checked['files'][name]: raise ValueError('Архив изменился во время восстановления.')
+            return mapped(check_version(json_data(data)))
         if copy:
             def new_id(key): return uuid5(NAMESPACE_URL,identity_seed+key).hex if identity_seed else uuid4().hex
             lib['id']=new_id('library'+lib['id']);lib['name']=lib['name'][:110]+' (копия)'
             mids={m:new_id('material'+m) for m in lib['materials']};vids={v:new_id('version'+v) for v in versions}
             lib['materials']={mids[m]:{**card,'id':mids[m],'versions':[vids[v] for v in card['versions']]} for m,card in lib['materials'].items()}
-            versions={vids[vid]:{**v,'id':vids[vid],'material_id':mids[v['material_id']],'library_id':lib['id'],'parent':vids[v['parent']] if v['parent'] else None} for vid,v in versions.items()}
             if library.folder(lib['id']).exists() and identity_seed:
                 if library.load(lib['id'])!=lib: raise ValueError('Ранее восстановленная копия уже изменена; повтор не применён.')
-                for mid,card in lib['materials'].items():
-                    for vid in card['versions']:
-                        if library.version(lib['id'],mid,vid,verify=True)!=versions[vid]: raise ValueError('Ранее восстановленная копия повреждена.')
+                with ZipFile(path) as z:
+                    for vid in versions:
+                        v=read_version(z,vid)
+                        if library.version(lib['id'],v['material_id'],v['id'],verify=True)!=v: raise ValueError('Ранее восстановленная копия повреждена.')
                 return {'id':lib['id'],'name':lib['name'],'summary':checked['summary']}
         library.root.mkdir(exist_ok=True)
         with TemporaryDirectory(prefix='.restore-',dir=library.root) as tmp:
@@ -139,7 +151,9 @@ def restore(library,path,copy=False,cancel=lambda:False,progress=lambda *args:No
                     with z.open(name) as src,(staging/name).open('xb') as out:
                         actual=transfer(src,out,cancel);out.flush();os.fsync(out.fileno())
                     if actual!=expected: raise ValueError('Архив изменился во время восстановления.')
-            for vid,v in versions.items(): atomic_json(staging/'versions'/(vid+'.json'),v)
+                for vid in versions:
+                    if cancel(): raise ValueError('Восстановление отменено; прежние библиотеки сохранены.')
+                    v=read_version(z,vid);atomic_json(staging/'versions'/(v['id']+'.json'),v)
             atomic_json(staging/'library.json',lib)
             if cancel(): raise ValueError('Восстановление отменено; прежние библиотеки сохранены.')
             target=library.folder(lib['id'])

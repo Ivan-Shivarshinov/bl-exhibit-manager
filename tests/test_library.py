@@ -140,6 +140,9 @@ class LibraryTests(TestCase):
         other=self.library.create('Empty');self.assertEqual(self.library.catalog(other['id'])['total'],0)
         (self.library.folder(other['id'])/'library.json').write_text('broken','utf-8')
         with self.assertRaises(ValueError): self.library.catalog(other['id'])
+        listing=self.library.list();self.assertEqual(len(listing),2)
+        self.assertTrue(next(l for l in listing if l['id']==other['id'])['error'])
+        self.assertEqual(next(l for l in listing if l['id']==self.lib['id'])['name'],'Дело Example')
 
     def test_lazy_migration_and_old_archive_preserve_bytes_and_future_refusal(self):
         raw=(self.store.folder(self.p['id'])/'project.json').read_bytes()

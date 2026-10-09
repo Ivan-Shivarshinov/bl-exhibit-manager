@@ -95,4 +95,3 @@ class BulkTests(TestCase):
         usage=self.library.usage(self.lib['id'],material['material_id']);self.assertEqual(len(usage['items']),1);self.assertEqual(len(usage['errors']),1)
         (self.store.folder(copied['id'])/'project.json').unlink();self.assertEqual(len(self.library.usage(self.lib['id'],material['material_id'])['errors']),1)
         self.library.hide(self.lib['id'],material['material_id'],False,revision+1);self.assertEqual(self.library.catalog(self.lib['id'])['total'],1)
-

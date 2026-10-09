@@ -155,8 +155,14 @@ class Library:
 
     def list(self):
         if not self.root.exists(): return []
-        return [{k: lib[k] for k in ('id', 'name', 'revision')} for lib in
-                (self.load(p.parent.name) for p in sorted(self.root.glob('*/library.json')))]
+        rows=[]
+        for folder in sorted(self.root.iterdir()):
+            if not ID.fullmatch(folder.name) or not folder.is_dir(): continue
+            try:
+                lib=self.load(folder.name);rows.append({k:lib[k] for k in ('id','name','revision')})
+            except (ValueError,OSError) as exc:
+                rows.append({'id':folder.name,'name':'Недоступная библиотека','revision':None,'error':str(exc)})
+        return rows
 
     def catalog(self, lid, query='', offset=0, limit=50, sort='title', **filters):
         if not 0 <= offset or not 1 <= limit <= 100: raise ValueError('Некорректная страница каталога.')
@@ -274,6 +280,7 @@ class Library:
                 progress(len(result),len(plan['rows']),'Сохраняем версии')
                 if cancel(): raise ValueError('Операция отменена до публикации; прежние материалы сохранены.')
                 v = check_version(row['version']); base = self.folder(lib['id'])
+                self.no_links(base/'blobs');self.no_links(base/'versions')
                 for part in v['parts'].values():
                     src = folder/part['blob']
                     with src.open('rb') as stream:
@@ -410,7 +417,7 @@ class Library:
                 card=self.load(prov['library_id'])['materials'][prov['material_id']]
                 result.update(available=True,versions=card['versions'],newer=card['versions'].index(prov['version_id'])<len(card['versions'])-1,
                               library_name=self.load(prov['library_id'])['name'])
-            except ValueError as exc: result.update(available=False,message=str(exc))
+            except (ValueError,OSError,KeyError,TypeError) as exc: result.update(available=False,message=str(exc))
             results.append(result)
         return results
 

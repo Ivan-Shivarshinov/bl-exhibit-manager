@@ -23,7 +23,7 @@ export default function MaterialLibrary({api,p,mode='browse',documentIds=[],onCh
   const [role,setRole]=useState('original'),[page,setPage]=useState(1),[image,setImage]=useState(''),[imageError,setImageError]=useState('');
   const dialog=useRef(null),generation=useRef(0);
   useEffect(()=>{const previous=document.activeElement;dialog.current.showModal();return()=>previous?.focus();},[]);
-  async function refreshLibraries(){const list=await api('/libraries');setLibraries(list);setLid(old=>list.some(l=>l.id===old)?old:list[0]?.id||'');}
+  async function refreshLibraries(){const list=await api('/libraries');setLibraries(list);setLid(old=>list.some(l=>l.id===old&&!l.error)?old:list.find(l=>!l.error)?.id||'');}
   useEffect(()=>{refreshLibraries().catch(e=>setError(e.message)).finally(()=>setLoading(false));},[]);
   useEffect(()=>{setOffset(0);setSelected(null);setVersion(null);setChosen([]);setRows([]);setPlan(null);},[lid,query]);
   useEffect(()=>{
@@ -72,6 +72,7 @@ export default function MaterialLibrary({api,p,mode='browse',documentIds=[],onCh
     <div className="library-controls"><label className="field">Библиотека<select aria-label="Библиотека" disabled={blocked} value={lid} onChange={e=>setLid(e.target.value)}><option value="">Выберите библиотеку</option>{libraries.map(l=><option key={l.id} value={l.id}>{l.name}</option>)}</select></label>
       <form className="actions" onSubmit={e=>{e.preventDefault();create();}}><input aria-label="Название новой библиотеки" placeholder="Название новой библиотеки" maxLength={120} required value={newName} onChange={e=>setNewName(e.target.value)} disabled={blocked}/><button disabled={blocked}>Создать библиотеку</button></form></div>
     {error&&<p className="error-note" role="alert">{error}</p>}{notice&&<p className="success-note" role="status">{notice}</p>}
+    {libraries.some(l=>l.error)&&<p className="pending">Есть недоступная библиотека. Её можно выбрать, чтобы прочитать причину, либо восстановить независимую копию из архива. Остальные библиотеки доступны.</p>}
     {busy&&<div className="library-progress" role="status"><p>{job?.message||'Проверяем…'} {job?.total?`${job.completed} из ${job.total}`:''}</p><progress {...(job?.total?{value:job.completed,max:job.total}:{})}/>{job?.id&&<button onClick={()=>api(`/material-operations/${job.id}/cancel`,{}).catch(e=>setError(e.message))}>Отменить операцию</button>}</div>}
     <LibraryArchive api={api} lid={lid} run={run} blocked={blocked} onRestored={async id=>{await refreshLibraries();setLid(id);setRevision(n=>n+1);}}/>
     {lid&&<LibraryUpload key={lid} api={api} lid={lid} run={run} blocked={blocked} onSaved={()=>setRevision(n=>n+1)}/>}
@@ -100,9 +101,9 @@ export default function MaterialLibrary({api,p,mode='browse',documentIds=[],onCh
           {imageError?<p className="error-note" role="alert">{imageError}</p>:image?<img className="material-preview" src={image} alt={`${roleNames[role]}, версия, страница ${page}`}/>:<p role="status">Готовим страницу…</p>}
         </>:<p role="status">Загружаем версию…</p>}</>}</section></div>}
     </>}
-    {selected&&<><LibraryUsage key={selected.id} api={api} lid={lid} mid={selected.id} onNavigate={onNavigate} blocked={blocked}/><button disabled={blocked} onClick={async()=>{setBusy(true);setError(" ");try{await api(`/libraries/${lid}/materials/${selected.id}/hidden`,{hidden:!selected.hidden,revision:catalog.library.revision});setSelected(null);setRevision(n=>n+1);}catch(e){setError(e.message);setRevision(n=>n+1);}finally{setBusy(false);}}}>{selected.hidden?"Вернуть материал в каталог":"Скрыть материал из каталога"}</button><p className="muted">Скрытие сохраняет версии и действующие подачи.</p></>} 
-    {selected&&<Comparison key={selected.id} api={api} lid={lid} mid={selected.id} versions={selected.versions} current={vid} run={run} blocked={blocked}/>} 
-    {p&&mode==='updates'&&<ProjectVersions api={api} p={p} run={run} blocked={blocked} onChanged={onChanged}/>} 
+    {selected&&<><LibraryUsage key={selected.id} api={api} lid={lid} mid={selected.id} onNavigate={onNavigate} blocked={blocked}/><button disabled={blocked} onClick={async()=>{setBusy(true);setError(" ");try{await api(`/libraries/${lid}/materials/${selected.id}/hidden`,{hidden:!selected.hidden,revision:catalog.library.revision});setSelected(null);setRevision(n=>n+1);}catch(e){setError(e.message);setRevision(n=>n+1);}finally{setBusy(false);}}}>{selected.hidden?"Вернуть материал в каталог":"Скрыть материал из каталога"}</button><p className="muted">Скрытие сохраняет версии и действующие подачи.</p></>}
+    {selected&&<Comparison key={selected.id} api={api} lid={lid} mid={selected.id} versions={selected.versions} current={vid} run={run} blocked={blocked}/>}
+    {p&&mode==='updates'&&<ProjectVersions api={api} p={p} run={run} blocked={blocked} onChanged={onChanged}/>}
     {rows.length>0&&<section><h2>Добавить в «{p.name}»</h2><p>Каждая строка получит независимую копию. Сохранённый перевод не запускается заново; результат с новым номером нужно просмотреть.</p><div className="table-scroll"><table className="library-assignment"><thead><tr><th>Материал / версия</th><th>Режим</th><th>Номер</th><th>Папка / имя PDF</th><th>Выбор</th></tr></thead><tbody>{rows.map((r,i)=><tr key={r.material_id}><td>{r.title}<select aria-label={`Версия ${r.title}`} value={r.version_id} onChange={e=>{setRows(rows.map((x,j)=>j===i?{...x,version_id:e.target.value}:x));setPlan(null);}}>{chosen[i].versions.map((v,n)=><option key={v} value={v}>Версия {n+1}</option>)}</select></td>
       <td><select aria-label={`Режим ${r.title}`} value={r.mode} onChange={e=>{setRows(rows.map((x,j)=>j===i?{...x,mode:e.target.value}:x));setPlan(null);}}><option value="prepare">Подготовить из оригинала</option><option value="passthrough">Готовый PDF без обработки</option></select></td>
       <td><label>Обозначение<select aria-label={`Обозначение ${r.title}`} value={r.designation} onChange={e=>{setRows(rows.map((x,j)=>j===i?{...x,designation:e.target.value}:x));setPlan(null);}}><option value="Annex">Annex</option><option value="Exhibit">Exhibit</option><option value="">Без обозначения</option></select></label><label>Префикс<input aria-label={`Префикс ${r.title}`} value={r.prefix} onChange={e=>{setRows(rows.map((x,j)=>j===i?{...x,prefix:e.target.value}:x));setPlan(null);}}/></label><label>Номер<input aria-label={`Номер ${r.title}`} type="number" min="1" value={r.number} onChange={e=>{setRows(rows.map((x,j)=>j===i?{...x,number:Number(e.target.value)}:x));setPlan(null);}}/></label></td>
@@ -112,6 +113,3 @@ export default function MaterialLibrary({api,p,mode='browse',documentIds=[],onCh
     </section>}
   </dialog>;
 }
-
-
-
