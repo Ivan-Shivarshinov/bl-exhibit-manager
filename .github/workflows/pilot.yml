@@ -123,4 +123,5 @@ jobs:
         with:
           pattern: legacy-*
           path: incoming-backups/legacy
+      - run: python -m pip install pypdf==6.10.0
       - run: python scripts/bundle_smoke.py release/BLExhibitManager-0.5.0-${{ matrix.target }}.zip incoming-backups

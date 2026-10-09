@@ -190,6 +190,7 @@ def main():
                 for i in range(100):(fixtures/f'Material {i:03d}.pdf').write_bytes(make_pdf(f'Fixture {i}',[[f'Distinct synthetic {i}']]))
                 browser_env=os.environ.copy();browser_env['LIBRARY_QA_URL']=base;browser_env['LIBRARY_QA_OUTPUT']=str(outgoing.resolve())
                 subprocess.run(['node','scripts/library_ui.cjs'],env=browser_env,check=True,timeout=240)
+                subprocess.run(['node','scripts/library_review_ui.cjs'],env=browser_env,check=True,timeout=240)
             before={str(p.relative_to(data)):p.read_bytes() for p in data.rglob('project.json')};assert before
             command('--stop');time.sleep(.3)
             # Move the application folder as an update/install-path change, retaining external data.

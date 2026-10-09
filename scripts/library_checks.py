@@ -32,7 +32,7 @@ def verify(request,data,output,incoming=None):
     source=request('/api/projects',{'name':'Library source'})
     source=request(f"/api/projects/{source['id']}/upload?name=Original.pdf",raw=original);sid=source['documents'][0]['id']
     source=request(f"/api/projects/{source['id']}/upload?kind=translation&did={sid}&name=Translation.pdf",raw=translation)
-    request(f"/api/projects/{source['id']}/documents/{sid}",{'number':3,'designation':'Annex','title':'Material one'})
+    request(f"/api/projects/{source['id']}/documents/{sid}",{'number':3,'designation':'Exhibit','title':'Material one'})
     request(f"/api/projects/{source['id']}/documents/{sid}/review/translation",{})
     source=request(f"/api/projects/{source['id']}/documents/{sid}/review/document",{})
     request(f"/api/projects/{source['id']}/export",{})
@@ -59,6 +59,8 @@ def verify(request,data,output,incoming=None):
     a,b=projects
     def tree(pid):return {p.relative_to(data/pid).as_posix():sha256(p.read_bytes()).hexdigest() for p in (data/pid).rglob('*') if p.is_file()}
     old_a,old_b=tree(a['id']),tree(b['id'])
+    request(f"/api/projects/{source['id']}/upload?kind=translation&did={sid}&name=Translation-v2.pdf",raw=original)
+    request(f"/api/projects/{source['id']}/documents/{sid}/review/translation",{})
     source=request(f"/api/projects/{source['id']}/documents/{sid}",{'title':'Material one, revised title'})
     plan=operation('save_preview',{'lid':lib['id'],'pid':source['id'],'rows':[{'document_id':sid,'material_id':material['material_id'],'allow_duplicate':True,'comment':'Title corrected'}]})
     v2=operation('publish',{'token':plan['token']})['materials'][0]
@@ -67,6 +69,19 @@ def verify(request,data,output,incoming=None):
     assert next(r['changed'] for r in comparison['changes'] if r['field']=='title')
     did=b['documents'][0]['id'];plan=operation('update_preview',{'pid':b['id'],'did':did,'version_id':v2['version_id']})
     b=operation('update_apply',{'token':plan['token']});assert b['documents'][0]['number']==12
+    assert b['documents'][0]['identifier']=='Annex 12'
+    assignments={k:b['documents'][0][k] for k in ('id','number','prefix','designation','folder','filename','filename_mode')}
+    from pypdf import PdfReader
+    def check_stamps(project,name):
+        request(f"/api/projects/{project['id']}/documents/{did}/review/document",{})
+        exported=request(f"/api/projects/{project['id']}/export",{})
+        with __import__('zipfile').ZipFile(BytesIO(exported)) as z:
+            pages=PdfReader(BytesIO(z.read('Submission/Evidence/Annex 12.pdf'))).pages
+            for page in pages:
+                text=page.extract_text();assert 'Annex 12' in text and 'Exhibit 12' not in text,text
+        (output/name).write_bytes(exported)
+        return len(pages)
+    updated_pages=check_stamps(b,'Annex-12-updated.zip')
     assert tree(a['id'])==old_a
     assert all(tree(b['id'])[n]==h for n,h in old_b.items() if n!='project.json')
     pzip=request(f"/api/projects/{b['id']}/backup",{})['token'];(output/'library-project.zip').write_bytes(request('/api/backups/'+pzip+'/download'))
@@ -80,6 +95,8 @@ def verify(request,data,output,incoming=None):
     finally:(data/'libraries'/(lib['id']+'-unavailable')).rename(data/'libraries'/lib['id'])
     plan=operation('update_preview',{'pid':b['id'],'did':did,'version_id':material['version_id']})
     b=operation('update_apply',{'token':plan['token']});assert b['documents'][0]['title']=='Material one'
+    assert {k:b['documents'][0][k] for k in assignments}==assignments
+    rollback_pages=check_stamps(b,'Annex-12-rollback.zip')
     assert tree(a['id'])==old_a
     exchanged=[]
     if incoming:
@@ -105,7 +122,8 @@ def verify(request,data,output,incoming=None):
             request(f"/api/projects/{restored['id']}/export",{})
             exchanged.append(str(archive))
     report={'platform':platform.platform(),'python':platform.python_version(),'result':'passed','materials':20,'libraries':2,'numbers':[3,12],
-            'selective_update_and_rollback':True,'source_and_old_zip_hashes_preserved':True,'exchange':exchanged}
+            'selective_update_and_rollback':True,'source_and_old_zip_hashes_preserved':True,'exchange':exchanged,
+            'library_designation':'Exhibit','local_designation':'Annex','updated_pdf_pages':updated_pages,'rollback_pdf_pages':rollback_pages,'correct_stamp_on_every_page':True}
     (output/'library-report.json').write_text(json.dumps(report,ensure_ascii=False,indent=2),'utf-8')
     return report
 

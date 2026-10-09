@@ -3,7 +3,7 @@ from copy import deepcopy
 from datetime import datetime, timezone, date
 from hashlib import sha256
 from pathlib import Path
-from uuid import uuid4
+from uuid import uuid4, uuid5, NAMESPACE_URL
 import json
 import os
 import re
@@ -111,6 +111,7 @@ class Library:
         self.root = store.root/'libraries'
         self.work = store.root/'.library-work'
         self.cache = {}
+        self.match_cache = {}
 
     def folder(self, lid):
         self.no_links(self.root)
@@ -207,6 +208,15 @@ class Library:
         if not part: raise ValueError('В версии нет выбранной части.')
         return pdf.render_png(self.part(lid,part).read_bytes(),page,scale)
 
+    def planned_page(self, token, vid, role='original', page=1):
+        folder=self.pending(token);plan=json_data((folder/'plan.json').read_bytes());uid(vid)
+        v=next((r['version'] for r in plan.get('rows',[]) if r['version']['id']==vid),None)
+        if not v or role not in v['parts']: raise ValueError('Часть предварительного состава не найдена.')
+        part=v['parts'][role];path=folder/part['blob'];self.no_links(path)
+        with path.open('rb') as stream:
+            if hash_stream(stream)!={k:part[k] for k in ('sha256','size')}: raise ValueError('Временный PDF повреждён. Повторите проверку.')
+        return pdf.render_png(path.read_bytes(),page,1.2)
+
     def pending(self, token=None):
         self.no_links(self.work)
         folder = self.work/uid(token or uuid4().hex)
@@ -223,11 +233,56 @@ class Library:
             with file.open('xb') as stream: stream.write(data); stream.flush(); os.fsync(stream.fileno())
         return {'name':clean_text(Path(name).name), 'sha256':h,'blob':blob,'size':len(data),**info}
 
+    @staticmethod
+    def content_parts(v):
+        return {k:x['sha256'] for k,x in v['parts'].items() if k!='ready' or 'original' not in v['parts']}
+
+    def match_index(self, lib, cancel=lambda:False):
+        """All immutable versions, not the latest catalog page; never read PDF bytes."""
+        cached=self.match_cache.get(lib['id'])
+        if cached and cached[0]==lib['revision']: return cached[1]
+        index={'exact':{},'original':{}}
+        for card in lib['materials'].values():
+            for number,vid in enumerate(card['versions'],1):
+                if cancel(): raise ValueError('Проверка совпадений отменена.')
+                v=self.version(lib['id'],card['id'],vid,_catalog=lib)
+                self.index_match(index,v,number,hidden=card['hidden'])
+        self.match_cache[lib['id']]=(lib['revision'],index)
+        return index
+
+    def index_match(self, index, v, number, **extra):
+        content=self.content_parts(v)
+        entry={'material_id':v['material_id'],'version_id':v['id'],'version_number':number,
+               'title':v['metadata']['title'],'parts':content,**extra}
+        index['exact'].setdefault(digest(content),[]).append(entry)
+        if 'original' in content: index['original'].setdefault(content['original'],[]).append(entry)
+
+    def matches(self, index, v):
+        content=self.content_parts(v);signature=digest(content)
+        exact=[{**x,'kind':'exact'} for x in index['exact'].get(signature,[])]
+        related=[{**x,'kind':'original'} for x in index['original'].get(content.get('original'),[]) if x['parts']!=content]
+        return exact,related
+
+    @staticmethod
+    def compact_matches(plan):
+        # A 100-row batch can share thousands of historical matches. Store each
+        # description once so plans and durable job results stay bounded.
+        registry={}
+        for row in plan['rows']:
+            for key in ('duplicates','related'):
+                entries=row.get(key,[])
+                row[key]=[]
+                for match in entries:
+                    identity=match['version_id']+':'+match['kind']
+                    registry[identity]=match;row[key].append(identity)
+        plan['matches']=registry
+        return plan
+
     def save_preview(self, lid, pid, rows, cancel=lambda:False, progress=lambda *args:None):
         self.check_rows(rows)
         with LOCK, io_errors():
             lib = self.load(lid); p = self.store.load(pid); folder = self.pending()
-            planned = []; errors = []; warnings = []
+            planned = []; errors = []; warnings = []; index=deepcopy(self.match_index(lib,cancel))
             for row in rows:
                 if cancel(): raise ValueError('Операция отменена до публикации.')
                 progress(len(planned)+len(errors),len(rows),'Проверяем состав материалов')
@@ -257,16 +312,17 @@ class Library:
                          'ready_identifier':identifier(doc,p) if 'ready' in parts else None}
                     check_version(v)
                     signature = digest({k:x['sha256'] for k,x in parts.items() if k != 'ready' or 'original' not in parts})
-                    duplicates = [m['id'] for m in lib['materials'].values() if m['latest']['signature']==signature]
-                    duplicates += [r['version']['material_id'] for r in planned if digest({k:x['sha256'] for k,x in r['version']['parts'].items() if k!='ready' or 'original' not in r['version']['parts']})==signature]
-                    planned.append({'version':v,'duplicates':duplicates,'allow_duplicate':row.get('allow_duplicate',False)})
+                    duplicates,related=self.matches(index,v)
+                    planned.append({'version':v,'duplicates':duplicates,'related':related,'allow_duplicate':row.get('allow_duplicate',False)})
+                    self.index_match(index,v,len(lib['materials'].get(mid,{}).get('versions',[]))+1,batch=True)
                 except (ValueError,KeyError) as exc: errors.append({'document_id':row.get('document_id'),'message':str(exc)})
             plan = {'action':'save','library_id':lid,'revision':lib['revision'],'project_id':pid,'project_digest':digest(p),
                     'rows':planned,'errors':errors,'warnings':warnings}
+            self.compact_matches(plan)
             atomic_json(folder/'plan.json',plan)
             return {'token':folder.name,**plan}
 
-    def publish(self, token, cancel=lambda:False, progress=lambda *args:None):
+    def publish(self, token, cancel=lambda:False, progress=lambda *args:None, decisions=None):
         folder = self.pending(token); plan = json_data((folder/'plan.json').read_bytes())
         if plan.get('action')!='save': raise ValueError('Повторите проверку состава для сохранения материала.')
         with LOCK, io_errors():
@@ -275,11 +331,50 @@ class Library:
             if plan['errors'] or not plan['rows']: raise ValueError('Исключите ошибочные строки и повторите предварительную проверку.')
             if lib['revision'] != plan['revision']: raise ValueError('Библиотека изменилась. Повторите предварительную проверку.')
             if plan.get('project_id') and digest(self.store.load(plan['project_id'])) != plan['project_digest']: raise ValueError('Подача изменилась. Повторите предварительную проверку.')
-            if any(r['duplicates'] and not r['allow_duplicate'] for r in plan['rows']): raise ValueError('Выберите явное решение для точного дубликата.')
-            result = []
+            decisions=decisions or {}
+            if not isinstance(decisions,dict) or not decisions.keys()<={r['version']['id'] for r in plan['rows']}:
+                raise ValueError('Повторите выбор решения для каждого совпадения.')
+            resolved=[]
+            # Resolve the entire batch before writing any immutable files.
+            references={}
             for row in plan['rows']:
+                v=deepcopy(row['version']);decision=decisions.get(v['id'])
+                matches=[plan['matches'][key] for key in row['duplicates']+row.get('related',[])]
+                if not decision:
+                    if row['duplicates'] and not row['allow_duplicate']: raise ValueError('Выберите явное решение для точного дубликата.')
+                    decision={'action':'version' if v['parent'] else 'separate'}
+                if not isinstance(decision,dict) or decision.get('action') not in ('reuse','version','separate'):
+                    raise ValueError('Выберите использование материала, новую версию или отдельный материал.')
+                action=decision['action'];chosen=None
+                if decision.get('version_id'):
+                    match=next((x for x in matches if x['version_id']==decision['version_id']),None)
+                    if not match: raise ValueError('Выбранное совпадение отсутствует в проверенном составе.')
+                    chosen=references.get(match['version_id']) if match.get('batch') else {'library_id':lib['id'],'material_id':match['material_id'],'version_id':match['version_id']}
+                    if not chosen: raise ValueError('Сначала разрешите совпадение в предыдущей строке.')
+                    if action=='reuse' and match['kind']!='exact': raise ValueError('Одинаковый оригинал с другим переводом не является полным совпадением.')
+                if action=='reuse':
+                    if not chosen: raise ValueError('Укажите конкретный существующий материал и версию.')
+                    if not any(x['version']['id']==chosen['version_id'] for x in resolved):
+                        self.version(lib['id'],chosen['material_id'],chosen['version_id'],verify=True,_catalog=lib)
+                    result_ref={**chosen,'action':'reuse'}
+                else:
+                    if action=='version':
+                        mid=chosen['material_id'] if chosen else v['material_id']
+                        previous=next((x['version']['id'] for x in reversed(resolved) if x['version']['material_id']==mid and x['action']!='reuse'),None)
+                        parent=previous or (lib['materials'][mid]['versions'][-1] if mid in lib['materials'] else None)
+                        if not parent: raise ValueError('Материал для новой версии не найден.')
+                        v.update(material_id=mid,parent=parent)
+                    elif v['parent']:
+                        v.update(material_id=uuid5(NAMESPACE_URL,'separate:'+token+':'+v['id']).hex,parent=None)
+                    result_ref={'library_id':lib['id'],'material_id':v['material_id'],'version_id':v['id'],'action':action}
+                references[row['version']['id']]=result_ref
+                resolved.append({'version':v,'action':action,'reference':result_ref})
+            result = []
+            for row in resolved:
                 progress(len(result),len(plan['rows']),'Сохраняем версии')
                 if cancel(): raise ValueError('Операция отменена до публикации; прежние материалы сохранены.')
+                if row['action']=='reuse':
+                    result.append(row['reference']);continue
                 v = check_version(row['version']); base = self.folder(lib['id'])
                 self.no_links(base/'blobs');self.no_links(base/'versions')
                 for part in v['parts'].values():
@@ -301,7 +396,7 @@ class Library:
                 item['versions'].append(v['id'])
                 item['latest'] = {'metadata':v['metadata'],'created_at':v['created_at'],'names':[x['name'] for x in v['parts'].values()],
                                   'translated':'translation' in v['parts'], 'signature':digest({k:x['sha256'] for k,x in v['parts'].items() if k!='ready' or 'original' not in v['parts']})}
-                result.append({'library_id':lib['id'],'material_id':v['material_id'],'version_id':v['id']})
+                result.append(row['reference'])
             if cancel(): raise ValueError('Операция отменена до публикации; прежние материалы сохранены.')
             lib['revision'] += 1; lib['operations'][token] = {'materials':result}
             atomic_json(self.folder(lib['id'])/'library.json',lib)
@@ -444,9 +539,16 @@ class Library:
                       'selection':deepcopy(v['recipe']['selection']) if role=='original' else [{'page':i+1} for i in range(parts[role]['pages'])],
                       'translation_selection':deepcopy(v['recipe']['translation_selection']) if role=='original' and 'translation' in parts else [],
                       'format_overrides':deepcopy(v['recipe']['format']), 'translation_confirmed':role=='original' and 'translation' in parts}
+            # Designation belongs to this submission, even though it is stored
+            # in the formatting layer. Library typography may never rename it.
+            local_designation=effective_format(p,d)[0]['designation']
+            incoming['format_overrides']['designation']=local_designation
             changed=[]; conflicts=[]; proposed=deepcopy(d)
             for key in COPY_FIELDS:
                 base,local,remote=prov['base'][key],d.get(key),incoming[key]
+                if key=='format_overrides':
+                    base={**base,'designation':local_designation}
+                    local={**local,'designation':local_designation}
                 is_local=local!=base; is_remote=remote!=base
                 conflict=is_local and local!=remote and is_remote
                 if is_local or is_remote:
@@ -546,7 +648,7 @@ class Library:
     def upload_preview(self, lid, rows, cancel=lambda:False, progress=lambda *args:None):
         self.check_rows(rows)
         with LOCK,io_errors():
-            lib=self.load(lid);folder=self.pending();planned=[];errors=[]
+            lib=self.load(lid);folder=self.pending();planned=[];errors=[];index=deepcopy(self.match_index(lib,cancel))
             tokens=[r.get('token') for r in rows]
             if len(set(tokens))!=len(tokens): raise ValueError('Один загруженный файл указан несколько раз.')
             primaries={r['token']:r for r in rows if r.get('role') in ('original','ready')}
@@ -577,11 +679,12 @@ class Library:
                        'parts':parts,'recipe':recipe,'translation_binding':b,'ready_identifier':clean_text(row.get('ready_identifier','')) if row['role']=='ready' else None}
                     check_version(v)
                     signature=digest({k:x['sha256'] for k,x in parts.items() if k!='ready' or 'original' not in parts})
-                    duplicates=[m['id'] for m in lib['materials'].values() if m['latest']['signature']==signature]
-                    duplicates += [r['version']['material_id'] for r in planned if digest({k:x['sha256'] for k,x in r['version']['parts'].items() if k!='ready' or 'original' not in r['version']['parts']})==signature]
-                    planned.append({'version':v,'duplicates':duplicates,'allow_duplicate':bool(row.get('allow_duplicate'))})
+                    duplicates,related=self.matches(index,v)
+                    planned.append({'version':v,'duplicates':duplicates,'related':related,'allow_duplicate':bool(row.get('allow_duplicate'))})
+                    self.index_match(index,v,len(lib['materials'].get(mid,{}).get('versions',[]))+1,batch=True)
                 except (ValueError,KeyError) as exc: errors.append({'token':token,'message':str(exc)})
             plan={'action':'save','library_id':lid,'revision':lib['revision'],'rows':planned,'errors':errors,'warnings':[]}
+            self.compact_matches(plan)
             atomic_json(folder/'plan.json',plan)
             return {'token':folder.name,**plan}
 

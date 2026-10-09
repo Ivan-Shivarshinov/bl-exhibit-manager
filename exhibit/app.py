@@ -541,6 +541,19 @@ def material_version(lid: str, mid: str, vid: str):
     return material_services()[0].version(lid,mid,vid)
 
 
+@app.get('/api/libraries/{lid}/materials/{mid}')
+def material_card(lid: str, mid: str):
+    from .library import uid
+    card=material_services()[0].load(lid)['materials'].get(uid(mid))
+    if not card: raise ValueError('Материал не найден.')
+    return card
+
+
+@app.get('/api/material-previews/{token}/{vid}')
+def planned_material_page(token: str, vid: str, role: str='original', page: int=1):
+    return Response(material_services()[0].planned_page(token,vid,role,page),media_type='image/png')
+
+
 @app.get('/api/projects/{pid}/library-status')
 def library_status(pid: str):
     return material_services()[0].notifications(pid)

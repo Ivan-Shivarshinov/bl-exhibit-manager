@@ -24,7 +24,7 @@ def verify(output):
     output.mkdir(parents=True,exist_ok=True)
     with TemporaryDirectory(prefix='library-office-') as tmp:
         store=Store(tmp);lib=Library(store);source=store.create('Source');store.upload(source,'Source.pdf',make_pdf('Source',[['Synthetic document']]))
-        doc=source['documents'][0];store.update(source,doc['id'],{'title':'Original title','number':3,'designation':'Annex'});store.approve(source,doc['id'],'document')
+        doc=source['documents'][0];store.update(source,doc['id'],{'title':'Original title','number':3,'designation':'Exhibit'});store.approve(source,doc['id'],'document')
         library=lib.create('Case');v1=lib.publish(lib.save_preview(library['id'],source['id'],[{'document_id':doc['id']}])['token'])['materials'][0]
         projects=[];old_zips=[];source_hashes=[]
         for number in (3,12):
