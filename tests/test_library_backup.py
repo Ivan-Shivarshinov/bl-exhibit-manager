@@ -61,6 +61,9 @@ class ArchiveTests(TestCase):
         broken=self.store.root/'cancelled.zip'
         with self.assertRaises(ValueError):library_backup.save(self.library,self.lib['id'],broken,cancel=lambda:True)
         self.assertFalse(broken.exists())
+        previous=self.path.read_bytes()
+        with self.assertRaises(ValueError):library_backup.save(self.library,self.lib['id'],self.path)
+        self.assertEqual(self.path.read_bytes(),previous)
 
     def test_tampered_traversal_symlink_duplicate_future_missing_and_wrong_type_rejected(self):
         self.archive()

@@ -100,9 +100,10 @@ def save(library,lid,destination,cancel=lambda:False,progress=lambda *args:None)
                 for p in v['parts'].values(): members['blobs/'+p['blob']]=library.part(lid,p)
         if len(members)>MAX_FILES or sum(len(v) if isinstance(v,bytes) else v.stat().st_size for v in members.values())>MAX_BYTES:
             raise ValueError('Библиотека превышает предел архива: 8 ГБ или 20 000 файлов.')
+        archive_file=Path(destination).open('xb')
         try:
             files={}
-            with ZipFile(destination,'x',ZIP_DEFLATED,allowZip64=True) as z:
+            with archive_file,ZipFile(archive_file,'w',ZIP_DEFLATED,allowZip64=True) as z:
                 from io import BytesIO
                 for n,(name,value) in enumerate(members.items()):
                     if cancel(): raise ValueError('Сохранение архива отменено.')
