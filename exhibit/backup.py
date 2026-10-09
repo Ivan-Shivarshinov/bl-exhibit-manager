@@ -78,6 +78,14 @@ def check_project(p, files, read):
             fail('В архиве отсутствует или повреждён обязательный исходник.')
     source(p.get('main'))
     for doc in p['documents']:
+        if doc.get('provenance') is not None:
+            from .library import uid, HASH, COPY_FIELDS
+            prov = doc['provenance']
+            if p['schema'] < 2 or not isinstance(prov, dict) or prov.get('schema') != 1:
+                fail('Неподдерживаемое происхождение библиотечного материала.')
+            for key in ('library_id','material_id','version_id'): uid(prov.get(key))
+            if not HASH.fullmatch(str(prov.get('version_hash',''))) or not isinstance(prov.get('base'),dict) or set(prov['base']) != set(COPY_FIELDS):
+                fail('Неполный снимок происхождения материала.')
         required_text = ('title', 'prefix', 'designation', 'filename', 'folder', 'language', 'original_label', 'translation_label')
         if any(not isinstance(doc.get(k), str) for k in required_text) or doc.get('mode') not in ('prepare', 'passthrough'):
             fail('Повреждены настройки документа.')
@@ -257,7 +265,7 @@ def restore_archive(store, path, copy=False):
             from .project import Store
             class StagedStore(Store):
                 def folder(self, pid): return staging
-            p = upgrade(StagedStore(store.root), p)
+            p = upgrade(StagedStore(store.root), p, target=p['schema'])
             target = store.folder(p['id'])
             if target.exists(): fail('Проект уже появился на диске. Повторите проверку архива.')
             staging.rename(target)

@@ -34,7 +34,7 @@ def identifier(doc, p=None):
 
 
 def review_digest(doc, style):
-    return digest({"doc": {k: v for k, v in doc.items() if k not in ("approved", "identifier", "format_overrides", "filename_mode", "short_title")}, "style": style})
+    return digest({"doc": {k: v for k, v in doc.items() if k not in ("approved", "identifier", "format_overrides", "filename_mode", "short_title", "provenance", "translation_binding")}, "style": style})
 
 
 def group_key(folder):
@@ -107,7 +107,7 @@ class Store:
         if not isinstance(p, dict) or p.get('id') != pid:
             raise ValueError('Идентификатор проекта не соответствует папке. Файлы не изменены.')
         from .schema import upgrade
-        return upgrade(self, p)
+        return upgrade(self, p, target=p.get('schema'))
 
     def save(self, p):
         folder = self.folder(p["id"])
@@ -205,6 +205,7 @@ class Store:
             doc[kind] = source
             doc["selection" if kind == "original" else "translation_selection"] = [{"page": n+1} for n in range(source["pages"])]
             doc["translation_confirmed"] = False
+            doc.pop('translation_binding', None)
             doc["approved"] = None
         else:
             stem = Path(name).stem
@@ -275,6 +276,8 @@ class Store:
             layer.update(changes["style"] or {})
         if "mode" in changes and changes["mode"] != doc["mode"]:
             doc["approved"] = None
+        if doc.get('translation_binding') and any(key in changes and changes[key] != doc.get(key) for key in ('selection','translation_selection')):
+            doc['translation_confirmed'] = False
         doc.update(changes)
         doc["format_overrides"] = layer
         if "filename" in changes:
@@ -306,10 +309,13 @@ class Store:
                 raise ValueError("Перевод не прикреплён.")
             self.source(p, doc["translation"])
             doc["translation_confirmed"] = True
+            from .library import binding
+            doc['translation_binding'] = binding(doc)
         elif action == "remove_translation":
             doc["translation"] = None
             doc["translation_selection"] = []
             doc["translation_confirmed"] = False
+            doc.pop('translation_binding', None)
         elif action == "document":
             if doc["translation"] and not doc["translation_confirmed"]:
                 raise ValueError("Сначала подтвердите проверку перевода.")

@@ -24,6 +24,8 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
           python-version: '3.12'
@@ -38,12 +40,16 @@ jobs:
         run: python -m pip install --no-cache-dir -r requirements-build.txt
       - run: npm ci --prefix web
       - run: npm run build --prefix web
+      - run: npx --prefix web playwright install chromium
       - run: node --test web/tests/*.test.js
       - run: python -m unittest discover -s tests -q
       - name: Verify native local Word setup (simulated Word host)
         run: python scripts/verify_word_setup_native.py
       - run: python scripts/build_bundle.py
-      - run: python scripts/bundle_smoke.py release/BLExhibitManager-0.4.0-${{ matrix.target }}.zip
+      - run: python scripts/generate_legacy_archives.py
+      - run: python scripts/bundle_smoke.py release/BLExhibitManager-0.5.0-${{ matrix.target }}.zip
+        env:
+          EXHIBIT_BROWSER_QA: '1'
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: pilot-${{ matrix.target }}
@@ -53,7 +59,12 @@ jobs:
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: backup-${{ matrix.target }}
-          path: output/backup-exchange/${{ matrix.target }}/project.zip
+          path: output/backup-exchange/${{ matrix.target }}/
+          if-no-files-found: error
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: legacy-${{ matrix.target }}
+          path: output/legacy-archives/
           if-no-files-found: error
       - name: Install native LibreOffice on macOS
         if: runner.os == 'macOS'
@@ -67,6 +78,9 @@ jobs:
       - name: Verify bitmap images, TOC and relative links in LibreOffice PDF
         if: runner.os == 'macOS'
         run: python scripts/verify_office_images.py --output output/feedback-office/images
+      - name: Verify library import and rename with real LibreOffice
+        if: runner.os == 'macOS'
+        run: python scripts/verify_library_office.py --output output/feedback-office/library
       - name: Verify DOCX revisions and immutable history without Word pane
         if: runner.os == 'macOS'
         run: python scripts/verify_revisions_office.py --output output/feedback-office/revisions
@@ -105,4 +119,9 @@ jobs:
         with:
           pattern: backup-*
           path: incoming-backups
-      - run: python scripts/bundle_smoke.py release/BLExhibitManager-0.4.0-${{ matrix.target }}.zip incoming-backups
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          pattern: legacy-*
+          path: incoming-backups/legacy
+      - run: python -m pip install pypdf==6.10.0
+      - run: python scripts/bundle_smoke.py release/BLExhibitManager-0.5.0-${{ matrix.target }}.zip incoming-backups

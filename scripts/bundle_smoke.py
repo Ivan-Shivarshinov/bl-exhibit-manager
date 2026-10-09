@@ -15,6 +15,8 @@ from urllib.request import Request,urlopen
 from urllib.error import HTTPError
 from zipfile import ZipFile
 
+sys.path.insert(0,str(Path(__file__).resolve().parent.parent))
+
 
 def main():
     archive=Path(sys.argv[1]).resolve()
@@ -54,7 +56,7 @@ def main():
                 raise AssertionError(f'{path}: HTTP {exc.code}: '+exc.read().decode(errors='replace')+'\n'+(log.read_text('utf-8',errors='replace')[-16000:] if log.exists() else 'No server log')) from exc
         try:
             command('--no-browser')
-            health=request('/api/health');assert health['version']=='0.4.0'
+            health=request('/api/health');assert health['version']=='0.5.0'
             html=request('/').decode();assert 'root' in html
             for asset in re.findall(r'(?:src|href)="(/assets/[^\"]+)"',html):assert len(request(asset))>100
             assert request('/api/word/status')['configured'] is False
@@ -73,7 +75,7 @@ def main():
             assert b'BEGIN CERTIFICATE' in certificate and b'PRIVATE KEY' not in certificate
             context=ssl.create_default_context(cadata=certificate.decode())
             with urlopen(f'https://localhost:{tls_port}/api/health',context=context,timeout=5) as response:
-                assert json.load(response)['version']=='0.4.0'
+                assert json.load(response)['version']=='0.5.0'
             # Protocol smoke with an explicitly simulated Word host. This does
             # not claim Office.js validation in a real Word application.
             def panel(body):
@@ -158,7 +160,7 @@ def main():
             (data/pid/f'translation-{did}.json').write_text(json.dumps(draft),'utf-8')
             token=request(f'/api/projects/{pid}/backup',{})['token']
             saved=request(f'/api/backups/{token}/download')
-            target=archive.stem.split('0.4.0-')[-1]
+            target=archive.stem.split('0.5.0-')[-1]
             outgoing=Path('output/backup-exchange')/target;outgoing.mkdir(parents=True,exist_ok=True)
             (outgoing/'project.zip').write_bytes(saved)
             check=request('/api/backups/preview',raw=saved);assert check['conflict'] and check['summary']['exports']==3
@@ -177,6 +179,18 @@ def main():
                                 assert (data/restored['id']/name).read_bytes()==z.read(name),name
                     assert all(r.get('keep_original') for r in restored['references'])
                     print('BACKUP_EXCHANGE_OK='+str(source_archive))
+            from library_checks import verify as library_verify,load_check
+            library_verify(request,data,outgoing,Path(sys.argv[2]) if len(sys.argv)>2 else Path('output/legacy-archives'))
+            # Native builds already measure this exact package. The exchange host
+            # deliberately has no source/build dependencies: exercise only its EXE/app.
+            if len(sys.argv)==2:load_check(request,data,outgoing)
+            if os.environ.get('EXHIBIT_BROWSER_QA')=='1':
+                from exhibit.samples import make_pdf
+                fixtures=outgoing/'fixtures';fixtures.mkdir(exist_ok=True)
+                for i in range(100):(fixtures/f'Material {i:03d}.pdf').write_bytes(make_pdf(f'Fixture {i}',[[f'Distinct synthetic {i}']]))
+                browser_env=os.environ.copy();browser_env['LIBRARY_QA_URL']=base;browser_env['LIBRARY_QA_OUTPUT']=str(outgoing.resolve())
+                subprocess.run(['node','scripts/library_ui.cjs'],env=browser_env,check=True,timeout=240)
+                subprocess.run(['node','scripts/library_review_ui.cjs'],env=browser_env,check=True,timeout=240)
             before={str(p.relative_to(data)):p.read_bytes() for p in data.rglob('project.json')};assert before
             command('--stop');time.sleep(.3)
             # Move the application folder as an update/install-path change, retaining external data.
