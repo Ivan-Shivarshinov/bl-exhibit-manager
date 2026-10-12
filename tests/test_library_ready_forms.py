@@ -49,3 +49,17 @@ class ReadyLibraryForms(TestCase):
         self.assertTrue(original['errors']);self.assertIn('Добавить готовые PDF',original['errors'][0]['message'])
         ready=self.l.upload_preview(self.lib['id'],[{'token':folder.name,'role':'ready','metadata':{'title':'Form'}}])
         self.assertFalse(ready['errors']);self.l.publish(ready['token'])
+
+    def test_shared_blob_does_not_inherit_ready_permission_for_original(self):
+        from exhibit.library_backup import summary
+        data=form_pdf('widget');source=self.s.create('Ready source')
+        self.s.upload(source,'Ready.pdf',data,mode='passthrough')
+        plan=self.l.save_preview(self.lib['id'],source['id'],[{'document_id':source['documents'][0]['id']}])
+        ref=self.l.publish(plan['token'])['materials'][0]
+        v=self.l.version(ref['library_id'],ref['material_id'])
+        v['parts']['original']=deepcopy(v['parts']['ready'])
+        v['recipe']['selection']=[{'page':1},{'page':2}]
+        atomic_json(self.l.folder(self.lib['id'])/'versions'/(v['id']+'.json'),v)
+        lib=self.l.load(self.lib['id']);lib['materials'][ref['material_id']]['latest']=summary(v)
+        atomic_json(self.l.folder(self.lib['id'])/'library.json',lib)
+        with self.assertRaisesRegex(ValueError,'Добавить готовые PDF'):self.l.archive_save(self.lib['id'])

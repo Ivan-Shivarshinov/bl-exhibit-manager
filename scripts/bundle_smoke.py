@@ -211,6 +211,17 @@ def main():
             print(json.dumps({'bundle':archive.name,'platform':sys.platform,'version':health['version'],'checks':['isolated start','static UI and optional Word pane assets','panel presence protocol (simulated Word host)','duplicate start','demo DOCX/PDF','PDFium rendering','structured extraction','PDF ZIP export','ready PDF upload and batch byte preservation','DOCX revisions without panel','immutable ZIP history','graceful stop','relocation and project persistence','licenses'],'result':'passed'}))
         finally:
             command('--stop')
+            if os.name=='nt':
+                # The health port closes before Python's logging atexit handlers.
+                # Probe deletion sharing on our own log before TemporaryDirectory cleanup.
+                log=data/'application.log';closed=data/'application.closed.log'
+                assert log.resolve().is_relative_to(root.resolve())
+                deadline=time.monotonic()+15
+                while log.exists():
+                    try:log.rename(closed);closed.rename(log);break
+                    except PermissionError:
+                        if time.monotonic()>=deadline:raise
+                        time.sleep(.1)
 
 
 if __name__=='__main__':main()
