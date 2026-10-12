@@ -193,7 +193,7 @@ class Library:
         if (v['library_id'], v['material_id'], v['id']) != (lid,mid,vid): raise ValueError('Идентичность версии не совпадает.')
         if verify:
             for role, part in v['parts'].items():
-                info=pdf.inspect_pdf(self.part(lid,part),allow_forms=role=='ready')
+                info=pdf.inspect_pdf(self.part(lid,part).read_bytes(),allow_forms=role=='ready')
                 if any(info[k]!=part[k] for k in ('pages','sizes','text_pages')):
                     raise ValueError('Сведения о страницах библиотечного PDF не совпадают с файлом.')
         return v

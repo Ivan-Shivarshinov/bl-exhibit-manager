@@ -184,6 +184,7 @@ def main():
                 ready_output=Path('output/native-ready-qa')/target
                 verify_api(base,ready_output)
                 shutil.copy2(ready_output/'form-project.zip',outgoing/'ready-project.zip')
+                if (ready_output/'ready-library.zip').exists():shutil.copy2(ready_output/'ready-library.zip',outgoing/'ready-library.zip')
                 subprocess.run(['node','scripts/ready_pdf_ui.cjs'],check=True,timeout=240,
                     env={**os.environ,'READY_QA_URL':base,'READY_QA_OUTPUT':str(ready_output.resolve())})
             from library_checks import verify as library_verify,load_check

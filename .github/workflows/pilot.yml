@@ -63,6 +63,11 @@ jobs:
           if-no-files-found: error
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
+          name: ready-qa-${{ matrix.target }}
+          path: output/native-ready-qa/${{ matrix.target }}
+          if-no-files-found: error
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
           name: legacy-${{ matrix.target }}
           path: output/legacy-archives/
           if-no-files-found: error

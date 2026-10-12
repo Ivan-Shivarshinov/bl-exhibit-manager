@@ -100,6 +100,24 @@ def verify(request,data,output,incoming=None):
     assert tree(a['id'])==old_a
     exchanged=[]
     if incoming:
+        for archive in sorted(Path(incoming).rglob('ready-library.zip')):
+            uploaded=request('/api/library-files?archive=true&name=library.zip',raw=archive.read_bytes())
+            checked=operation('archive_preview',{'token':uploaded['token']})
+            copied=operation('archive_restore',{'token':uploaded['token'],'copy':checked['conflict']})
+            assert copied['summary']['materials']==1 and copied['summary']['versions']==1
+            catalog=request(f"/api/libraries/{copied['id']}/materials")
+            card=catalog['items'][0]
+            version=request(f"/api/libraries/{copied['id']}/materials/{card['id']}/versions/{card['versions'][-1]}")
+            assert set(version['parts'])=={'ready'}
+            import_project=request('/api/projects',{'name':'Transferred ready form'})
+            row={'library_id':copied['id'],'material_id':card['id'],'version_id':version['id'],
+                 'mode':'passthrough','designation':'Annex','number':12,'folder':'Evidence','filename':'Annex 12.pdf'}
+            plan=operation('import_preview',{'pid':import_project['id'],'rows':[row]});assert not plan['errors']
+            operation('import_apply',{'token':plan['token']})
+            result=request(f"/api/projects/{import_project['id']}/export",{})
+            with __import__('zipfile').ZipFile(BytesIO(result)) as z:
+                assert sha256(z.read('Submission/Evidence/Annex 12.pdf')).hexdigest()==version['parts']['ready']['sha256']
+            exchanged.append(str(archive))
         for archive in sorted(Path(incoming).rglob('library.zip')):
             uploaded=request('/api/library-files?archive=true&name=library.zip',raw=archive.read_bytes())
             preview=operation('archive_preview',{'token':uploaded['token']})

@@ -6,6 +6,7 @@ from io import BytesIO
 import json
 from pathlib import Path
 import sys
+import time
 from tempfile import TemporaryDirectory
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError
@@ -55,6 +56,42 @@ def verify_api(base, output):
     restored=request(f"/backups/{preview['token']}/restore",{'copy':True})
     with ZipFile(BytesIO(request(f"/projects/{restored['id']}/export",{}))) as z:
         assert z.read('Submission/Evidence/Subfolder/Renamed.pdf')==source
+    library_ready=False
+    try:
+        with urlopen(base+'/api/libraries',timeout=30) as response: has_library=response.status==200
+    except HTTPError as exc:
+        assert exc.code==404;has_library=False
+    if has_library:
+        def operation(action,arguments):
+            job=request('/material-operations',{'action':action,'arguments':arguments})
+            deadline=time.monotonic()+90
+            while time.monotonic()<deadline:
+                state=request('/material-operations/'+job['id'])
+                if state['state']=='complete':return state['result']
+                assert state['state'] not in ('error','cancelled','interrupted'),state
+                time.sleep(.05)
+            raise AssertionError('Ready library operation timed out')
+        lib=request('/libraries',{'name':'Native ready fields'})
+        plan=operation('save_preview',{'lid':lib['id'],'pid':pid,'rows':[{'document_id':did}]});assert not plan['errors']
+        ref=operation('publish',{'token':plan['token']})['materials'][0]
+        assert request(f"/libraries/{lib['id']}/materials/{ref['material_id']}/versions/{ref['version_id']}")['parts'].keys()=={'ready'}
+        target=request('/projects',{'name':'Independent ready library form'})
+        row={**ref,'mode':'passthrough','number':12,'designation':'Annex','filename':'Annex 12.pdf','folder':'Evidence'}
+        plan=operation('import_preview',{'pid':target['id'],'rows':[row]});assert not plan['errors']
+        target=operation('import_apply',{'token':plan['token']})
+        with ZipFile(BytesIO(request(f"/projects/{target['id']}/export",{}))) as z:assert z.read('Submission/Evidence/Annex 12.pdf')==source
+        request(f"/projects/{target['id']}/documents/{target['documents'][0]['id']}",{'mode':'prepare'},expected=400)
+        assert request(f'/projects/{pid}')==before
+        blocked=operation('import_preview',{'pid':target['id'],'rows':[{**row,'mode':'prepare'}]});assert blocked['errors']
+        uploaded=request('/library-files?name=Form.pdf',raw=source)
+        bad=operation('upload_preview',{'lid':lib['id'],'rows':[{'token':uploaded['token'],'role':'original','metadata':{'title':'Restricted'}}]});assert bad['errors']
+        archived=operation('archive_save',{'lid':lib['id']})
+        raw=request('/library-archives/'+archived['token']+'/download');(output/'ready-library.zip').write_bytes(raw)
+        uploaded=request('/library-files?archive=true&name=library.zip',raw=raw)
+        operation('archive_preview',{'token':uploaded['token']})
+        copied=operation('archive_restore',{'token':uploaded['token'],'copy':True})
+        assert copied['summary']['materials']==1 and copied['summary']['versions']==1
+        library_ready=True
     # 100+ options arrive in an intentionally scrambled stored order.
     p=request('/projects',{'name':'Reference order 105'}); pid=p['id']
     numbers=[10,2,65,1,9]+[i for i in range(3,106) if i not in (9,10,65)]
@@ -67,7 +104,7 @@ def verify_api(base, output):
     p=request(f'/projects/{pid}/upload?kind=main&name=References.docx',raw=(fixtures/'References.docx').read_bytes())
     p=request(f'/projects/{pid}/scan',{})
     report={'result':'passed','platform':sys.platform,'pid':pid,'order':[d['id'] for d in p['documents']],
-            'form_sha256':sha256(source).hexdigest(),'forms_bytes_and_archive':True,'mode_refusal_atomic':True,
+            'form_sha256':sha256(source).hexdigest(),'forms_bytes_and_archive':True,'mode_refusal_atomic':True,'library_ready_roundtrip':library_ready,
             'fixture':'ephemeral certificate CMS signature; no validity assertion'}
     (output/'ready-api-report.json').write_text(json.dumps(report,indent=2),encoding='utf-8')
     return report

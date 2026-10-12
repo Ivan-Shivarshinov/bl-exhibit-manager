@@ -61,10 +61,44 @@ assert(base&&dir,'Set isolated READY_QA_URL and READY_QA_OUTPUT');
   await page.getByRole('button',{name:/Проверка и экспорт/}).click();
   const downloading=page.waitForEvent('download');await page.getByRole('button',{name:'Собрать подачу · ZIP',exact:true}).click();
   await(await downloading).saveAs(path.join(dir,'ui-ready.zip'));
+  let libraryUi=false;
+  await page.getByRole('button',{name:'Документы',exact:true}).click();
+  if(await page.getByRole('button',{name:'Сохранить в библиотеку',exact:true}).count()) {
+   const sourcePid=await page.getByLabel('Проект',{exact:true}).inputValue(),sourceBefore=await request('/projects/'+sourcePid);
+   await page.getByRole('button',{name:'Сохранить в библиотеку',exact:true}).click();
+   const dlg=page.locator('.library-dialog'),name='UI ready fields '+Date.now();
+   await dlg.getByLabel('Название новой библиотеки').fill(name);await dlg.getByRole('button',{name:'Создать библиотеку',exact:true}).click();
+   await page.waitForFunction(n=>document.querySelector('.library-dialog select[aria-label="Библиотека"]')?.selectedOptions[0]?.text===n,name);
+   const lid=await dlg.getByLabel('Библиотека',{exact:true}).inputValue();
+   await dlg.getByRole('button',{name:'Проверить состав',exact:true}).click();
+   await dlg.getByRole('button',{name:'Сохранить материалы',exact:true}).click();
+   await dlg.getByText('Решения применены. Исходная подача не изменена.',{exact:true}).waitFor();
+   await dlg.getByRole('button',{name:'Вернуться к подаче',exact:true}).click();
+   await page.locator('header').getByRole('button',{name:'Новая',exact:true}).click();
+   await page.getByLabel('Название',{exact:true}).fill('UI independent form library');await page.getByRole('button',{name:'Создать',exact:true}).click();
+   await page.locator('.modal-backdrop').waitFor({state:'hidden'});
+   await page.getByRole('button',{name:'Добавить из библиотеки',exact:true}).click();
+   await dlg.getByLabel('Библиотека',{exact:true}).selectOption(lid);
+   await dlg.getByRole('button',{name:'Annex 65',exact:true}).waitFor();
+   await dlg.locator('.library-items input[type="checkbox"]').first().check();
+   await dlg.getByRole('button',{name:'Добавить выбранные · 1',exact:true}).click();
+   await dlg.getByLabel('Режим Annex 65',{exact:true}).selectOption('passthrough');
+   await dlg.getByLabel('Номер Annex 65',{exact:true}).fill('12');
+   await dlg.getByLabel('Папка Annex 65',{exact:true}).fill('Evidence');
+   await dlg.getByLabel('Имя PDF Annex 65',{exact:true}).fill('Annex 12.pdf');
+   await dlg.getByRole('button',{name:'Проверить назначения',exact:true}).click();
+   await dlg.getByRole('button',{name:'Добавить в подачу',exact:true}).click();
+   await dlg.getByText('Материалы добавлены. Вернитесь в подачу, просмотрите результат и подтвердите подготовку.',{exact:true}).waitFor();
+   await dlg.getByRole('button',{name:'Вернуться к подаче',exact:true}).click();
+   await page.getByRole('button',{name:/Проверка и экспорт/}).click();
+   const download=page.waitForEvent('download');await page.getByRole('button',{name:'Собрать подачу · ZIP',exact:true}).click();
+   await(await download).saveAs(path.join(dir,'ui-library-ready.zip'));
+   assert.deepEqual(await request('/projects/'+sourcePid),sourceBefore);libraryUi=true;
+  }
   const report={result:'passed',browser:'Chromium',browser_plugin:'not available',page_identity:true,
    blank_page:false,framework_overlay:false,option_count:107,numeric_order:true,stable_targets_reload_scan:true,
    service_options:true,all_same:true,manual_add:true,stored_order_unchanged:true,
-   ready_upload_preview_export:true,viewports:[1440,760,390],errors};
+   ready_upload_preview_export:true,library_ready_ui:libraryUi,viewports:[1440,760,390],errors};
   assert.deepEqual(errors,[]);fs.writeFileSync(path.join(dir,'ready-ui-report.json'),JSON.stringify(report,null,2));console.log(JSON.stringify(report));
  } finally {await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});
