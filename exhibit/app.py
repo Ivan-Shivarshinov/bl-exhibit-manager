@@ -594,7 +594,8 @@ async def library_file_upload(request: Request, name: str, archive: bool=False):
         if not size: raise ValueError('Выберите непустой файл.')
         if archive: return {'token':folder.name}
         if not name.lower().endswith('.pdf'): raise ValueError('Выберите PDF.')
-        part=await run_in_threadpool(lib.stage_part,folder,name,path.read_bytes())
+        # Receipt is temporary and role-free; publication checks each chosen role.
+        part=await run_in_threadpool(lib.stage_part,folder,name,path.read_bytes(),allow_forms=True)
         from .library import atomic_json
         atomic_json(folder/'part.json',part)
         path.unlink()

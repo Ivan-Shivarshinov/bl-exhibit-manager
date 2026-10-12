@@ -75,6 +75,9 @@ jobs:
       - name: Verify retained web citations and mixed Word runs
         if: runner.os == 'macOS'
         run: python scripts/verify_reference_options_office.py --output output/feedback-office/reference-options
+      - name: Verify unchanged ready forms and signatures through real LibreOffice
+        if: runner.os == 'macOS'
+        run: python scripts/verify_ready_pdf.py --office --output output/feedback-office/ready-pdf
       - name: Verify bitmap images, TOC and relative links in LibreOffice PDF
         if: runner.os == 'macOS'
         run: python scripts/verify_office_images.py --output output/feedback-office/images

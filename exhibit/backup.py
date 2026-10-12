@@ -96,6 +96,13 @@ def check_project(p, files, read):
         except (KeyError, TypeError, AttributeError) as exc: raise ValueError('Некорректное оформление документа.') from exc
         if not doc.get('original'): fail('В архиве отсутствует оригинал документа.')
         source(doc['original']); source(doc.get('translation'))
+        from .pdf import inspect_pdf
+        for role in ('original', 'translation'):
+            value = doc.get(role)
+            if value:
+                meta = inspect_pdf(read('inputs/'+value['blob']), allow_forms=role=='original' and doc['mode']=='passthrough')
+                if any(value.get(k) != meta[k] for k in ('pages','sizes')):
+                    fail('Сведения о страницах исходного PDF не совпадают с файлом.')
     for ref in p['references']:
         if not isinstance(ref, dict) or (ref.get('target') is not None and ref['target'] not in ids): fail('Ссылка указывает на отсутствующий документ.')
         if not {'key', 'target', 'mention', 'footnote'} <= ref.keys(): fail('Неполные данные ссылки.')

@@ -69,14 +69,15 @@ def inspect(path, cancel=lambda:False, progress=lambda *args:None):
                     v=check_version(json_data(z.read(name)))
                     if (v['id'],v['material_id'],v['library_id'],v['parent'])!=(vid,mid,lib['id'],parent): raise ValueError('Нарушена идентичность или порядок версий.')
                     parent=vid;versions.add(vid)
-                    for part in v['parts'].values():
+                    for role,part in v['parts'].items():
                         name='blobs/'+part['blob'];required.add(name)
                         if files.get(name)!={k:part[k] for k in ('sha256','size')}: raise ValueError('Отсутствует обязательная часть версии.')
-                        if name not in pdf_info:
+                        key=(name,role=='ready')
+                        if key not in pdf_info:
                             if cancel(): raise ValueError('Проверка архива отменена.')
                             from .pdf import inspect_pdf
-                            pdf_info[name]=digest(inspect_pdf(z.read(name)))
-                        if digest({k:part.get(k) for k in ('pages','sizes','text_pages')})!=pdf_info[name]: raise ValueError('Сведения о страницах не соответствуют PDF в архиве.')
+                            pdf_info[key]=digest(inspect_pdf(z.read(name),allow_forms=role=='ready'))
+                        if digest({k:part.get(k) for k in ('pages','sizes','text_pages')})!=pdf_info[key]: raise ValueError('Сведения о страницах не соответствуют PDF в архиве.')
                 if card['latest']!=summary(v): raise ValueError('Каталог не соответствует последней версии.')
             if required!=set(files): raise ValueError('В архиве есть посторонние или отсутствующие обязательные файлы.')
             return {'library':lib,'versions':sorted(versions),'files':files,'summary':{'materials':len(lib['materials']),'versions':len(versions),'files':len(files),'bytes':total},'created_at':manifest.get('created_at')}

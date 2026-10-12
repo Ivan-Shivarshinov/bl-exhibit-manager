@@ -170,7 +170,7 @@ def main():
             # Second CI job downloads archives produced on the other native systems.
             if len(sys.argv)>2:
                 incoming=Path(sys.argv[2])
-                for source_archive in incoming.rglob('project.zip'):
+                for source_archive in incoming.rglob('*project.zip'):
                     raw=source_archive.read_bytes();check=request('/api/backups/preview',raw=raw)
                     restored=request(f"/api/backups/{check['token']}/restore",{'copy':check['conflict']})
                     with ZipFile(BytesIO(raw)) as z:
@@ -179,6 +179,13 @@ def main():
                                 assert (data/restored['id']/name).read_bytes()==z.read(name),name
                     assert all(r.get('keep_original') for r in restored['references'])
                     print('BACKUP_EXCHANGE_OK='+str(source_archive))
+            else:
+                from verify_ready_pdf import verify_api
+                ready_output=Path('output/native-ready-qa')/target
+                verify_api(base,ready_output)
+                shutil.copy2(ready_output/'form-project.zip',outgoing/'ready-project.zip')
+                subprocess.run(['node','scripts/ready_pdf_ui.cjs'],check=True,timeout=240,
+                    env={**os.environ,'READY_QA_URL':base,'READY_QA_OUTPUT':str(ready_output.resolve())})
             from library_checks import verify as library_verify,load_check
             library_verify(request,data,outgoing,Path(sys.argv[2]) if len(sys.argv)>2 else Path('output/legacy-archives'))
             # Native builds already measure this exact package. The exchange host

@@ -192,7 +192,10 @@ class Library:
         except FileNotFoundError as exc: raise ValueError('Манифест версии отсутствует.') from exc
         if (v['library_id'], v['material_id'], v['id']) != (lid,mid,vid): raise ValueError('Идентичность версии не совпадает.')
         if verify:
-            for part in v['parts'].values(): self.part(lid, part)
+            for role, part in v['parts'].items():
+                info=pdf.inspect_pdf(self.part(lid,part),allow_forms=role=='ready')
+                if any(info[k]!=part[k] for k in ('pages','sizes','text_pages')):
+                    raise ValueError('Сведения о страницах библиотечного PDF не совпадают с файлом.')
         return v
 
     def part(self, lid, part):
@@ -225,9 +228,9 @@ class Library:
         folder.mkdir(parents=True,exist_ok=True)
         return folder
 
-    def stage_part(self, folder, name, data):
+    def stage_part(self, folder, name, data, *, allow_forms=False):
         if not data or len(data) > 50_000_000: raise ValueError('PDF должен быть не больше 50 МБ.')
-        info = pdf.inspect_pdf(data); h = sha256(data).hexdigest(); blob = h+'.pdf'
+        info = pdf.inspect_pdf(data,allow_forms=allow_forms); h = sha256(data).hexdigest(); blob = h+'.pdf'
         file = folder/blob
         if not file.exists():
             with file.open('xb') as stream: stream.write(data); stream.flush(); os.fsync(stream.fileno())
@@ -290,7 +293,7 @@ class Library:
                     doc = self.store.document(p, row['document_id']); parts = {}
                     if any(r['version']['material_id']==row.get('material_id') for r in planned): raise ValueError('Одна новая версия материала за одну операцию.')
                     role = 'ready' if doc['mode']=='passthrough' else 'original'
-                    parts[role] = self.stage_part(folder, doc['original']['name'],self.store.source(p,doc['original']))
+                    parts[role] = self.stage_part(folder, doc['original']['name'],self.store.source(p,doc['original']),allow_forms=role=='ready')
                     valid = translation_valid(doc)
                     if doc.get('translation') and not valid:
                         warnings.append({'document_id':doc['id'],'message':'Черновик перевода остаётся в подаче; можно сохранить только оригинал.'})
@@ -668,6 +671,7 @@ class Library:
                         upload=self.pending(r['token']);part=json_data((upload/'part.json').read_bytes())
                         with (upload/part['blob']).open('rb') as f:
                             if hash_stream(f)!={k:part[k] for k in ('sha256','size')}: raise ValueError('Загруженный PDF повреждён. Выберите его заново.')
+                        pdf.inspect_pdf((upload/part['blob']).read_bytes(),allow_forms=r['role']=='ready')
                         shutil.copyfile(upload/part['blob'],folder/part['blob']);parts[r['role']]=part
                     selections={k:[{'page':i+1} for i in range(p['pages'])] for k,p in parts.items()}
                     from .project import DEFAULT_STYLE,DEFAULT_LABELS,NEW_LAYOUT
