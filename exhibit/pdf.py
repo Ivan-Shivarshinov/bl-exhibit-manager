@@ -35,15 +35,50 @@ def init_font():
         pdfmetrics.registerFont(TTFont("DejaVu", str(FONT)))
 
 
-def inspect_pdf(data: bytes):
+def has_forms_or_signatures(reader):
+    """Inspect fields, orphan page widgets and certification signatures separately."""
+    root = reader.trailer['/Root'].get_object()
+    form = root.get('/AcroForm')
+    form = form.get_object() if form is not None else {}
+    fields = form.get('/Fields')
+    fields = fields.get_object() if fields is not None else []
+    if fields or form.get('/XFA'):
+        return True
+    pending = [root.get('/Perms')]
+    for page in reader.pages:
+        annotations = page.get('/Annots')
+        if annotations is not None:
+            pending.extend(annotations.get_object())
+    seen = set()
+    while pending:
+        value = pending.pop()
+        if value is None:
+            continue
+        value = value.get_object()
+        if id(value) in seen:
+            continue
+        seen.add(id(value))
+        if len(seen) > 20000:
+            raise ValueError('Слишком сложная структура полей PDF.')
+        if isinstance(value, dict):
+            if (value.get('/Subtype') == '/Widget' or value.get('/Type') == '/Sig'
+                    or value.get('/FT') == '/Sig' or '/ByteRange' in value):
+                return True
+            pending.extend(value.values())
+        elif isinstance(value, list):
+            pending.extend(value)
+    return False
+
+
+def inspect_pdf(data: bytes, *, allow_forms=False):
     try:
         reader = PdfReader(BytesIO(data), strict=True)
         if reader.is_encrypted:
             raise ValueError("Защищённые PDF пока не поддерживаются.")
         if not 0 < len(reader.pages) <= 1000:
             raise ValueError("PDF должен содержать от 1 до 1000 страниц.")
-        if reader.get_fields():
-            raise ValueError("PDF с формами или подписями пока не поддерживается для обработки.")
+        if not allow_forms and has_forms_or_signatures(reader):
+            raise ValueError('Этот PDF содержит поля формы или структуру подписи и не может быть переоформлен. Добавьте его через «Добавить готовые PDF»: файл сохранится без изменений. Действительность подписи не проверяется.')
         sizes = []
         for page in reader.pages:
             w, h = float(page.cropbox.width), float(page.cropbox.height)
@@ -62,10 +97,18 @@ def inspect_pdf(data: bytes):
 
 def render_png(data: bytes, page_number: int, scale=1.2):
     with PDF_LOCK, pdfium.PdfDocument(data) as pdf:
+        if not pdf.init_forms():
+            # Orphan widgets can have appearances even without a catalog AcroForm.
+            # No JavaScript platform/callbacks are supplied; this is read-only drawing.
+            config = pdfium.raw.FPDF_FORMFILLINFO(version=2)
+            environment = pdfium.raw.FPDFDOC_InitFormFillEnvironment(pdf, config)
+            if not environment:
+                raise ValueError('Не удалось показать поля PDF. Исходный файл не изменён.')
+            pdf.formenv = pdfium.PdfFormEnv(environment, config)
         if not 1 <= page_number <= len(pdf):
             raise ValueError("Страница вне документа.")
         page = pdf[page_number - 1]
-        bitmap = page.render(scale=raster_scale(*page.get_size(), scale), limit_image_cache=True)
+        bitmap = page.render(scale=raster_scale(*page.get_size(), scale), limit_image_cache=True, draw_annots=True)
         try:
             result = BytesIO()
             bitmap.to_pil().save(result, format="PNG")
@@ -140,6 +183,7 @@ def check_stamp_space(data, page_number, width, height, left, right, style):
 
 def prepare_part(data, selection, left, right, style):
     """Whole pages retain text; fragments contain ONLY pixels from the selected area."""
+    inspect_pdf(data)  # Also guard callers that bypass upload/mode validation.
     init_font()
     reader = PdfReader(BytesIO(data))
     validate_selection(selection, len(reader.pages))
@@ -206,6 +250,9 @@ def prepare_part(data, selection, left, right, style):
 def assemble(original, translation, doc, style):
     if doc["mode"] == "passthrough":
         return original  # Byte-for-byte preservation, including existing stamps.
+    inspect_pdf(original)
+    if translation:
+        inspect_pdf(translation)
     if doc.get("designation") and doc.get("number") is None:
         raise ValueError("Задайте номер приложения или выберите обозначение «Без слова».")
     right = stamp_label(doc)

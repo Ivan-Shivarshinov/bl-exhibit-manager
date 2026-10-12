@@ -1,4 +1,5 @@
 import React, {useRef, useState} from 'react';
+import {referenceDocuments} from './referenceOrder';
 
 export default function ReferenceAdd({footnotes, documents, initial, busy, error, onClose, onSave}) {
   const [index,setIndex]=useState(initial),[range,setRange]=useState(null),[draft,setDraft]=useState(''),[target,setTarget]=useState('');
@@ -24,7 +25,7 @@ export default function ReferenceAdd({footnotes, documents, initial, busy, error
     <p className="scope-text" tabIndex={0} ref={area} onMouseUp={selectedText} onKeyUp={selectedText}>{note.text}</p>
     <label className="field"><span>Текст новой ссылки</span><textarea rows={2} value={draft} onChange={e=>typed(e.target.value)}/></label>
     {draft&&!range?<p role="alert">Текст не найден или повторяется. Выделите нужное вхождение в тексте сноски.</p>:null}
-    <label className="field"><span>Файл новой ссылки</span><select value={target} onChange={e=>setTarget(e.target.value)}><option value="">Выберите файл</option>{documents.map(d=><option key={d.id} value={d.id}>{d.identifier?d.identifier+' · ':''}{d.title}</option>)}</select></label>
+    <label className="field"><span>Файл новой ссылки</span><select value={target} onChange={e=>setTarget(e.target.value)}><option value="">Выберите файл</option>{referenceDocuments(documents).map(d=><option key={d.id} value={d.id}>{d.identifier?d.identifier+' · ':''}{d.title}</option>)}</select></label>
     {error?<p role="alert" className="preview-error">{error}</p>:null}
     <button className="primary" disabled={Boolean(busy||!range||!target)} onClick={async()=>{if(await onSave({fid:note.fid,paragraph:note.paragraph,mention:draft,start:range[0],end:range[1],target}))onClose();}}>Создать ссылку</button>
   </section></div>;

@@ -54,7 +54,7 @@ def main():
                 raise AssertionError(f'{path}: HTTP {exc.code}: '+exc.read().decode(errors='replace')+'\n'+(log.read_text('utf-8',errors='replace')[-16000:] if log.exists() else 'No server log')) from exc
         try:
             command('--no-browser')
-            health=request('/api/health');assert health['version']=='0.4.0'
+            health=request('/api/health');assert health['version']=='0.4.1'
             html=request('/').decode();assert 'root' in html
             for asset in re.findall(r'(?:src|href)="(/assets/[^\"]+)"',html):assert len(request(asset))>100
             assert request('/api/word/status')['configured'] is False
@@ -73,7 +73,7 @@ def main():
             assert b'BEGIN CERTIFICATE' in certificate and b'PRIVATE KEY' not in certificate
             context=ssl.create_default_context(cadata=certificate.decode())
             with urlopen(f'https://localhost:{tls_port}/api/health',context=context,timeout=5) as response:
-                assert json.load(response)['version']=='0.4.0'
+                assert json.load(response)['version']=='0.4.1'
             # Protocol smoke with an explicitly simulated Word host. This does
             # not claim Office.js validation in a real Word application.
             def panel(body):
@@ -158,7 +158,7 @@ def main():
             (data/pid/f'translation-{did}.json').write_text(json.dumps(draft),'utf-8')
             token=request(f'/api/projects/{pid}/backup',{})['token']
             saved=request(f'/api/backups/{token}/download')
-            target=archive.stem.split('0.4.0-')[-1]
+            target=archive.stem.split('0.4.1-')[-1]
             outgoing=Path('output/backup-exchange')/target;outgoing.mkdir(parents=True,exist_ok=True)
             (outgoing/'project.zip').write_bytes(saved)
             check=request('/api/backups/preview',raw=saved);assert check['conflict'] and check['summary']['exports']==3
@@ -168,7 +168,7 @@ def main():
             # Second CI job downloads archives produced on the other native systems.
             if len(sys.argv)>2:
                 incoming=Path(sys.argv[2])
-                for source_archive in incoming.rglob('project.zip'):
+                for source_archive in incoming.rglob('*project.zip'):
                     raw=source_archive.read_bytes();check=request('/api/backups/preview',raw=raw)
                     restored=request(f"/api/backups/{check['token']}/restore",{'copy':check['conflict']})
                     with ZipFile(BytesIO(raw)) as z:
@@ -177,6 +177,13 @@ def main():
                                 assert (data/restored['id']/name).read_bytes()==z.read(name),name
                     assert all(r.get('keep_original') for r in restored['references'])
                     print('BACKUP_EXCHANGE_OK='+str(source_archive))
+            else:
+                from verify_ready_pdf import verify_api
+                ready_output=Path('output/native-ready-qa')/target
+                verify_api(base,ready_output)
+                shutil.copy2(ready_output/'form-project.zip',outgoing/'ready-project.zip')
+                subprocess.run(['node','scripts/ready_pdf_ui.cjs'],check=True,timeout=240,
+                    env={**os.environ,'READY_QA_URL':base,'READY_QA_OUTPUT':str(ready_output.resolve())})
             before={str(p.relative_to(data)):p.read_bytes() for p in data.rglob('project.json')};assert before
             command('--stop');time.sleep(.3)
             # Move the application folder as an update/install-path change, retaining external data.

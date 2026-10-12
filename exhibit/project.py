@@ -143,10 +143,10 @@ class Store:
             raise ValueError("Исходный файл изменён вне инструмента. Замените его и проверьте результат заново.")
         return data
 
-    def put(self, p, name, data, kind):
+    def put(self, p, name, data, kind, *, allow_forms=False):
         if not data or len(data) > 50_000_000 or not name.lower().endswith("."+kind):
             raise ValueError(f"Ожидается {kind.upper()} размером до 50 МБ.")
-        meta = pdf.inspect_pdf(data) if kind == "pdf" else {}
+        meta = pdf.inspect_pdf(data, allow_forms=allow_forms) if kind == "pdf" else {}
         if kind == "docx":
             word.package(data)
         hash_ = sha256(data).hexdigest()
@@ -168,7 +168,7 @@ class Store:
     def upload(self, p, name, data, kind="original", did=None, mode="prepare"):
         if mode not in ("prepare", "passthrough") or (mode == "passthrough" and (kind != "original" or did)):
             raise ValueError("Загрузка готового PDF доступна только для нового приложения.")
-        source = self.put(p, name, data, "docx" if kind == "main" else "pdf")
+        source = self.put(p, name, data, "docx" if kind == "main" else "pdf", allow_forms=mode=='passthrough')
         if kind == "main":
             previous = deepcopy(p)
             prior_bindings = p.get('restored_word_bindings', {}).get((p.get('main') or {}).get('sha256'), [])
@@ -247,6 +247,10 @@ class Store:
             raise ValueError('Короткое название: не более 250 символов.')
         if draft["mode"] not in ("prepare", "passthrough") or draft["designation"] not in ("Exhibit", "Annex", ""):
             raise ValueError("Некорректный режим или обозначение.")
+        if draft['mode'] == 'prepare' and doc['mode'] != 'prepare':
+            pdf.inspect_pdf(self.source(p, draft['original']))
+            if draft.get('translation'):
+                pdf.inspect_pdf(self.source(p, draft['translation']))
         if draft["number"] is not None and (type(draft["number"]) is not int or draft["number"] < 1):
             raise ValueError("Номер должен быть положительным целым числом.")
         if not isinstance(draft['prefix'],str) or (draft["prefix"] and not re.fullmatch(r"[A-Za-z][A-Za-z0-9]*(?:-[A-Za-z0-9]+)*", draft["prefix"])):
