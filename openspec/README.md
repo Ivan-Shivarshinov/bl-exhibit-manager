@@ -58,3 +58,5 @@ openspec validate --all --strict --no-interactive
 Команды Codex доступны как навыки `openspec-propose`, `openspec-apply-change`, `openspec-archive-change`; Claude — `/opsx:propose`, `/opsx:apply`, `/opsx:archive`. После начальной настройки может понадобиться новая сессия агента. Приоритет имеют текущие указания пользователя и `AGENTS.md`; шаблон навыка не отменяет уже данное разрешение работать.
 
 Официальное руководство: [OpenSpec в существующем проекте](https://github.com/Fission-AI/OpenSpec/blob/main/docs/existing-projects.md).
+
+Исправления 12 октября [ready-pdf-reference-order](changes/archive/2026-10-12-ready-pdf-reference-order/VALIDATION.md) реализованы и проверены в отдельной подготовленной 0.4.1 (PR #7), перенесены в 0.5.0 (PR #6). Задачи 10/10, оба полных нативных PR-CI успешны; требования синхронизированы, изменение архивировано. Это не факт объединения PR или выпуска.
