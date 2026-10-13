@@ -68,12 +68,23 @@ assert(base&&dir,'Set isolated READY_QA_URL and READY_QA_OUTPUT');
    await page.getByRole('button',{name:'Сохранить в библиотеку',exact:true}).click();
    const dlg=page.locator('.library-dialog'),name='UI ready fields '+Date.now();
    await dlg.getByLabel('Название новой библиотеки').fill(name);
-   const creatingLibrary=page.waitForResponse(r=>r.request().method()==='POST'&&new URL(r.url()).pathname==='/api/libraries');
-   await dlg.getByRole('button',{name:'Создать библиотеку',exact:true}).click();
-   const createdResponse=await creatingLibrary;assert(createdResponse.ok(),await createdResponse.text());
-   const createdLibrary=await createdResponse.json();assert.equal(createdLibrary.name,name);
-   try {await page.waitForFunction(id=>document.querySelector('.library-dialog select[aria-label="Библиотека"]')?.value===id,createdLibrary.id);}
-   catch(e){await page.screenshot({path:path.join(dir,'library-create-failure.png')});fs.writeFileSync(path.join(dir,'library-create-failure.json'),JSON.stringify({created:createdLibrary,options:await dlg.getByLabel('Библиотека',{exact:true}).locator('option').allTextContents(),value:await dlg.getByLabel('Библиотека',{exact:true}).inputValue(),errors:await dlg.locator('[role="alert"]').allTextContents()},null,2));throw e;}
+   // Do not spend the response deadline waiting for an unrelated catalog load
+   // to re-enable the form. This is an action readiness check, not a retry.
+   const events=[];const onRequest=r=>{if(new URL(r.url()).pathname.startsWith('/api/libraries'))events.push({event:'request',method:r.method(),path:new URL(r.url()).pathname});};
+   const onResponse=r=>{if(new URL(r.url()).pathname.startsWith('/api/libraries'))events.push({event:'response',status:r.status(),path:new URL(r.url()).pathname});};
+   const onFailed=r=>{if(new URL(r.url()).pathname.startsWith('/api/libraries'))events.push({event:'failed',path:new URL(r.url()).pathname,failure:r.failure()});};
+   page.on('request',onRequest);page.on('response',onResponse);page.on('requestfailed',onFailed);
+   let createdLibrary;
+   try {
+    await page.waitForFunction(expected=>{const form=document.querySelector('.library-dialog form');return form?.querySelector('input')?.value===expected&&!form.querySelector('button')?.disabled;},name);
+    const [createdResponse]=await Promise.all([
+     page.waitForResponse(r=>r.request().method()==='POST'&&new URL(r.url()).pathname==='/api/libraries'),
+     dlg.getByRole('button',{name:'Создать библиотеку',exact:true}).click(),
+    ]);assert(createdResponse.ok(),await createdResponse.text());
+    createdLibrary=await createdResponse.json();assert.equal(createdLibrary.name,name);
+    await page.waitForFunction(id=>document.querySelector('.library-dialog select[aria-label="Библиотека"]')?.value===id,createdLibrary.id);
+   } catch(e){await page.screenshot({path:path.join(dir,'library-create-failure.png')});fs.writeFileSync(path.join(dir,'library-create-failure.json'),JSON.stringify({created:createdLibrary,events,input:await dlg.getByLabel('Название новой библиотеки').inputValue(),disabled:await dlg.getByRole('button',{name:'Создать библиотеку',exact:true}).isDisabled(),validity:await dlg.getByLabel('Название новой библиотеки').evaluate(el=>({valid:el.validity.valid,message:el.validationMessage})),options:await dlg.getByLabel('Библиотека',{exact:true}).locator('option').allTextContents(),value:await dlg.getByLabel('Библиотека',{exact:true}).inputValue(),errors:await dlg.locator('[role="alert"]').allTextContents()},null,2));throw e;}
+   finally {page.off('request',onRequest);page.off('response',onResponse);page.off('requestfailed',onFailed);}
    const lid=await dlg.getByLabel('Библиотека',{exact:true}).inputValue();
    await dlg.getByRole('button',{name:'Проверить состав',exact:true}).click();
    await dlg.getByRole('button',{name:'Сохранить материалы',exact:true}).click();
