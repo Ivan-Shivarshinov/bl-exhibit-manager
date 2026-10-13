@@ -79,6 +79,12 @@ jobs:
       - name: Verify DOCX revisions and immutable history without Word pane
         if: runner.os == 'macOS'
         run: python scripts/verify_revisions_office.py --output output/feedback-office/revisions
+      - name: Install layout measurement tools for synthetic QA only
+        if: runner.os == 'macOS'
+        run: python -m pip install pymupdf==1.28.2
+      - name: Verify footnote offsets, linked DOCX, typography and explicit signature grouping
+        if: runner.os == 'macOS'
+        run: python scripts/layout_probe.py --output output/feedback-office/layout
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always() && runner.os == 'macOS'
         with:
