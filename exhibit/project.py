@@ -502,13 +502,16 @@ class Store:
         engine = main_pdf.available()
         result = {k: v for k, v in engine.items() if k != "executable"}
         result["ready"] = False
+        if p.get('main') and engine.get('available'):
+            from . import font_diagnostics
+            result['fonts'] = font_diagnostics.inspect(self.source(p,p['main']),engine)
         if p["main"] and p.get("scanned") and p["links_reviewed"]:
             key, _, _ = self.main_pdf_key(p)
             folder = self.folder(p["id"]) / "main-pdf"
             try:
                 meta = json.loads((folder / (key+".json")).read_text("utf-8"))
                 if sha256((folder / (key+".pdf")).read_bytes()).hexdigest() == meta["sha256"]:
-                    result.update(ready=True, pages=meta["pages"], converted_with=meta["engine"], key=key)
+                    result.update(ready=True, pages=meta["pages"], converted_with=meta["engine"], key=key, rendered_fonts=meta.get('rendered_fonts'))
             except (OSError, ValueError, KeyError): pass
         return result
 
@@ -522,6 +525,8 @@ class Store:
         result = main_pdf.convert_docx(data, list(paths.values()))
         folder.mkdir(exist_ok=True)
         meta = {"sha256": sha256(result).hexdigest(), "pages": pdf.inspect_pdf(result)["pages"], "engine": main_pdf.available()["label"]}
+        from . import font_diagnostics
+        meta['rendered_fonts']=font_diagnostics.pdf_report(result,font_diagnostics.required_families(data))
         with LOCK:
             temp = folder / (key+".tmp")
             temp.write_bytes(result); os.replace(temp, folder / (key+".pdf"))
