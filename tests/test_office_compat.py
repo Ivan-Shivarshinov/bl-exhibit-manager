@@ -169,7 +169,7 @@ class OfficeCompatibility(unittest.TestCase):
             self.assertEqual('word/media/image1.emf.png' in parts, engine['engine']=='libreoffice')
             out = BytesIO(); c = canvas.Canvas(out); c.drawString(10,10,'fixture'); c.save(); target.write_bytes(out.getvalue())
         for engine in ['word','libreoffice']:
-            with patch.object(main_pdf,'available',return_value={'available':True,'engine':engine}), patch.object(main_pdf,'office_export',side_effect=export):
+            with patch.object(main_pdf,'available',return_value={'available':True,'engine':engine}), patch.object(main_pdf,'office_export',side_effect=export), patch.object(main_pdf.office_layout,'separator_offsets',return_value=None):
                 self.assertTrue(main_pdf.convert_docx(source,[]).startswith(b'%PDF'))
 
     def test_conversion_version_invalidates_old_cached_pdf(self):

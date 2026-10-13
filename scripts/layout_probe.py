@@ -10,9 +10,9 @@ from docx import Document
 from docx.shared import Pt
 from PIL import Image, ImageDraw
 from lxml import etree as E
-from exhibit import word, main_pdf, office_compat
+from exhibit import word, main_pdf, office_compat, font_diagnostics
+from unittest.mock import patch
 from pypdf import PdfReader
-import pymupdf as fitz
 
 CT='http://schemas.openxmlformats.org/package/2006/content-types'
 
@@ -41,14 +41,18 @@ def footnotes(left=567, first=142, margin=72, long=False, font='Liberation Serif
         E.SubElement(pp,f'{{{word.W}}}spacing',{f'{{{word.W}}}after':'0'})
         if i==0:
             r=E.SubElement(p,f'{{{word.W}}}r');E.SubElement(r,f'{{{word.W}}}footnoteRef')
-        r=E.SubElement(p,f'{{{word.W}}}r');E.SubElement(r,f'{{{word.W}}}t').text=f'Footnote evidence line {i+1:03}: synthetic material for layout verification.'
+        r=E.SubElement(p,f'{{{word.W}}}r');E.SubElement(r,f'{{{word.W}}}t').text=('Annex 1, Training source, p. 1. ' if i==0 else '')+f'Footnote evidence line {i+1:03}: synthetic material for layout verification.'
     buffer=BytesIO();doc.save(buffer);parts=word.package(buffer.getvalue());parts[word.FOOT]=E.tostring(root)
     types=word.xml(parts['[Content_Types].xml']);E.SubElement(types,'{'+CT+'}Override',PartName='/'+word.FOOT,ContentType='application/vnd.openxmlformats-officedocument.wordprocessingml.footnotes+xml')
     parts['[Content_Types].xml']=E.tostring(types)
     rels=word.xml(parts['word/_rels/document.xml.rels']);E.SubElement(rels,'{'+word.REL+'}Relationship',Id='rIdNotes',Type=word.R+'/footnotes',Target='footnotes.xml');parts['word/_rels/document.xml.rels']=E.tostring(rels)
+    settings=word.xml(parts['word/settings.xml']);fp=E.SubElement(settings,f'{{{word.W}}}footnotePr')
+    for i in ['-1','0']:E.SubElement(fp,f'{{{word.W}}}footnote',{f'{{{word.W}}}id':i})
+    parts['word/settings.xml']=E.tostring(settings)
     return pack(parts)
 
 def pdf_summary(data, directory=None):
+    import pymupdf as fitz
     d=fitz.open(stream=data,filetype='pdf');r=PdfReader(BytesIO(data));pages=[]
     for i,p in enumerate(d):
         shapes=[]
@@ -78,7 +82,7 @@ def signature(keep=False, font='Liberation Serif'):
     for axis in ['H','V']:
         pos=E.SubElement(anchor,'{'+WP+'}position'+axis,relativeFrom='column' if axis=='H' else 'paragraph');E.SubElement(pos,'{'+WP+'}posOffset').text='0'
     for child in list(inline):anchor.append(child)
-    anchor.insert(5,E.Element('{'+WP+'}wrapNone'))
+    anchor.insert(next(i for i,n in enumerate(anchor) if n.tag=='{'+WP+'}docPr'),E.Element('{'+WP+'}wrapNone'))
     inline.getparent().replace(inline,anchor)
     for text in ['____________________','Fictional Person','Counsel in synthetic example']:
         q=doc.add_paragraph(text);q.paragraph_format.keep_with_next=keep and text!='Counsel in synthetic example'
@@ -96,6 +100,7 @@ def export(data, directory, engine, format='pdf'):
     return dst.read_bytes()
 
 def main():
+    import pymupdf as fitz
     ap=argparse.ArgumentParser();ap.add_argument('--output',required=True);ap.add_argument('--executable');args=ap.parse_args()
     out=Path(args.output).resolve();out.mkdir(parents=True,exist_ok=True)
     engine={'available':True,'engine':'libreoffice','label':'LibreOffice','executable':args.executable} if args.executable else main_pdf.available()
@@ -104,10 +109,60 @@ def main():
         data=footnotes(left,first,margin,long);dire=out/name
         pdf=export(data,dire,engine);report['cases'][name]=pdf_summary(pdf,dire)
         if engine['engine']=='libreoffice':(dire/'imported.fodt').write_bytes(export(data,dire/'import',engine,'fodt'))
+        if engine['engine']=='libreoffice':
+            with patch.object(main_pdf,'available',return_value=engine):fixed=main_pdf.convert_docx(data,[])
+            dest=dire/'fixed';dest.mkdir(exist_ok=True);(dest/'Main document.pdf').write_bytes(fixed)
+            got=pdf_summary(fixed,dest);report['cases'][name]['fixed']=got
+            original=report['cases'][name]
+            assert original['pages']==got['pages']
+            for i,(old,new) in enumerate(zip(original['details'],got['details'])):
+                assert old['text_blocks']==new['text_blocks'],(name,i,'text moved')
+                assert old['fonts']==new['fonts'],(name,i,'font changed')
+                expected=margin+(left+first)/20
+                assert all(abs(d['rect'][0]-expected)<1 for d in new['drawings']),(name,i,new['drawings'])
+                if i>0:assert all(abs(d['rect'][2]-540)<1 for d in new['drawings']),(name,i,'continuation')
+            report['cases'][name]['unchanged_text_and_fonts']=True
     for keep in [False,True]:
         name='signature-'+str(keep).lower();dire=out/name
         report['cases'][name]=pdf_summary(export(signature(keep),dire,engine),dire)
+        if keep:
+            note=fitz.open(dire/'Main document.pdf');images=[i for i,p in enumerate(note) if p.get_images()]
+            for label in ['Respectfully submitted','Fictional Person','Counsel in synthetic example']:
+                assert [i for i,p in enumerate(note) if label in p.get_text()]==images,('grouped signature split',label)
+    for font in ['Times New Roman','Missing Synthetic Font']:
+        name='font-'+font.replace(' ','-');dire=out/name;data=footnotes(font=font);result=export(data,dire,engine)
+        report['cases'][name]={'preflight':font_diagnostics.inspect(data,engine),'rendered':font_diagnostics.pdf_report(result,[font]),'pdf':pdf_summary(result)}
+        if font=='Missing Synthetic Font':
+            assert report['cases'][name]['preflight']['missing']==[font]
+            assert report['cases'][name]['rendered']['unconfirmed']==[font]
+    from exhibit.project import Store
+    from exhibit.samples import make_pdf
+    from zipfile import ZipFile
+    directory=out/'full-application';directory.mkdir(exist_ok=True)
+    with patch.object(main_pdf,'available',return_value=engine):
+        store=Store(directory/'data');p=store.create('Synthetic layout submission')
+        attachment=make_pdf('Training source',[['Fictional evidence']]);store.upload(p,'Annex 1.pdf',attachment,mode='passthrough')
+        data=footnotes();store.upload(p,'Main.docx',data,'main');store.scan(p);store.confirm_links(p)
+        linked,paths=store.linked_main(p);direct=export(linked,directory/'direct-linked',engine)
+        marked,markers=main_pdf.marked_docx(linked,list(paths.values()));prepared=office_compat.prepare_docx(marked) if engine['engine']=='libreoffice' else marked
+        converted=export(prepared,directory/'prepared',engine);portable=main_pdf.portable_links(converted,markers)
+        before,after=pdf_summary(converted),pdf_summary(portable)
+        assert [x['content_sha256'] for x in before['details']]==[x['content_sha256'] for x in after['details']]
+        assert max(abs(float(u)-float(v)) for x,y in zip(before['details'],after['details']) for u,v in zip(x['box'],y['box']))<1e-5
+        archive=store.export(p);(directory/'Submission.zip').write_bytes(archive)
+        with ZipFile(BytesIO(archive)) as z:
+            downloaded=z.read('Submission/Main document.docx');pdf=z.read('Submission/Main document.pdf')
+            assert z.read('Submission/Annex 1.pdf')==attachment
+        original,actual=word.package(data),word.package(downloaded)
+        assert all(actual[n]==b for n,b in original.items() if n not in (word.FOOT,word.RELS))
+        assert store.source(p,p['main'])==data
+        r=PdfReader(BytesIO(pdf));targets=[str(a.get_object()['/A']['/F']['/UF']) for page in r.pages for a in page.get('/Annots',[]) if a.get_object().get('/A',{}).get('/S')=='/GoToR']
+        assert targets==['Annex 1.pdf'],targets
+        (directory/'linked.docx').write_bytes(downloaded);(directory/'Main document.pdf').write_bytes(pdf)
+        report['application']={'source_unchanged':True,'downloaded_docx_preserved':True,'portable_content_unchanged':True,'targets':targets,'direct_linked':pdf_summary(direct),'final':pdf_summary(pdf,directory),'fonts':store.main_pdf_status(p).get('rendered_fonts')}
     (out/'results.json').write_text(json.dumps(report,indent=2),encoding='utf-8')
-    print(json.dumps({'version':report['version'],'cases':{k:v['pages'] for k,v in report['cases'].items()}}))
+    report['fonts']=font_diagnostics.inspect(footnotes(font='Times New Roman'),engine)
+    (out/'results.json').write_text(json.dumps(report,indent=2),encoding='utf-8')
+    print(json.dumps({'version':report['version'],'cases':{k:v.get('pages',v.get('pdf',{}).get('pages')) for k,v in report['cases'].items()},'application':{k:v for k,v in report['application'].items() if k not in ('direct_linked','final')}}))
 
 if __name__=='__main__':main()
