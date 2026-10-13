@@ -8,6 +8,8 @@ import argparse, json, subprocess, sys
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from docx import Document
 from docx.shared import Pt
+from docx.enum.section import WD_SECTION_START
+from copy import deepcopy
 from PIL import Image, ImageDraw
 from lxml import etree as E
 from exhibit import word, main_pdf, office_compat, font_diagnostics
@@ -88,6 +90,12 @@ def signature(keep=False, font='Liberation Serif'):
         q=doc.add_paragraph(text);q.paragraph_format.keep_with_next=keep and text!='Counsel in synthetic example'
     out=BytesIO();doc.save(out);return out.getvalue()
 
+def section_notes():
+    doc=Document(BytesIO(footnotes()));section=doc.add_section(WD_SECTION_START.NEW_PAGE);section.left_margin=Pt(108)
+    p=doc.add_paragraph('Second synthetic section');r=E.SubElement(p._p,f'{{{word.W}}}r');E.SubElement(r,f'{{{word.W}}}footnoteReference',{f'{{{word.W}}}id':'2'})
+    out=BytesIO();doc.save(out);parts=word.package(out.getvalue());root=word.xml(parts[word.FOOT]);note=deepcopy(root[-1]);note.set(f'{{{word.W}}}id','2');root.append(note);parts[word.FOOT]=E.tostring(root)
+    return pack(parts)
+
 def export(data, directory, engine, format='pdf'):
     directory.mkdir(parents=True,exist_ok=True)
     src=directory/'Main document.docx';src.write_bytes(data)
@@ -129,6 +137,20 @@ def main():
             note=fitz.open(dire/'Main document.pdf');images=[i for i,p in enumerate(note) if any(p.get_image_rects(im[0]) for im in p.get_images())]
             for label in ['Respectfully submitted','Fictional Person','Counsel in synthetic example']:
                 assert [i for i,p in enumerate(note) if label in p.get_text()]==images,('grouped signature split',label)
+    if engine['engine']=='libreoffice':
+        cases={'two-sections':section_notes()}
+        parts=word.package(footnotes());root=word.xml(parts[word.FOOT]);rule=root[0].find('.//w:separator',word.NS);rule.getparent().remove(rule);parts[word.FOOT]=E.tostring(root);cases['no-regular-rule']=pack(parts)
+        for name,data in cases.items():
+            dire=out/name;direct=export(data,dire,engine)
+            with patch.object(main_pdf,'available',return_value=engine):fixed=main_pdf.convert_docx(data,[])
+            target=dire/'fixed';target.mkdir(exist_ok=True);(target/'Main document.pdf').write_bytes(fixed)
+            a,b=pdf_summary(direct),pdf_summary(fixed,target)
+            assert a['pages']==b['pages']
+            for i,(old,new) in enumerate(zip(a['details'],b['details'])):
+                assert old['text_blocks']==new['text_blocks'],(name,i,'text moved')
+                if name=='two-sections':assert all(abs(d['rect'][0]-([72,108][i]+35.45))<1 for d in new['drawings']),(name,i,new['drawings'])
+                else:assert not new['drawings'],(name,i,new['drawings'])
+            report['cases'][name]=b
     for font in ['Times New Roman','Missing Synthetic Font']:
         name='font-'+font.replace(' ','-');dire=out/name;data=footnotes(font=font);result=export(data,dire,engine)
         report['cases'][name]={'preflight':font_diagnostics.inspect(data,engine),'rendered':font_diagnostics.pdf_report(result,[font]),'pdf':pdf_summary(result)}

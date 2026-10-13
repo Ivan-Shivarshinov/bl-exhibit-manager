@@ -8,7 +8,7 @@ from exhibit import office_layout, font_diagnostics, word
 from scripts.layout_probe import footnotes, pack
 
 
-def tagged_pdf(continued=False, extra_path=False, missing_note=False):
+def tagged_pdf(continued=False, extra_path=False, missing_note=False, second_note=False):
     writer=PdfWriter();writer.add_blank_page(612,792)
     if continued:writer.add_blank_page(612,792)
     page=writer.pages[-1]
@@ -19,12 +19,17 @@ def tagged_pdf(continued=False, extra_path=False, missing_note=False):
     if not missing_note:
         note=DictionaryObject({NameObject('/Type'):NameObject('/StructElem'),NameObject('/S'):NameObject('/Note'),NameObject('/Pg'):writer.pages[0].indirect_reference,
             NameObject('/K'):DictionaryObject({NameObject('/Type'):NameObject('/MCR'),NameObject('/Pg'):page.indirect_reference,NameObject('/MCID'):NumberObject(1)})})
+        if continued and not second_note:
+            note[NameObject('/K')]=ArrayObject([DictionaryObject({NameObject('/Type'):NameObject('/MCR'),NameObject('/Pg'):writer.pages[0].indirect_reference,NameObject('/MCID'):NumberObject(1)}),note['/K']])
         writer._root_object[NameObject('/StructTreeRoot')]=DictionaryObject({NameObject('/K'):ArrayObject([writer._add_object(note)])})
     out=BytesIO();writer.write(out);return out.getvalue()
 
 
 class OfficeLayout(unittest.TestCase):
     tags={'#092137':{'width':468,'original':'#000000'}}
+    def test_absent_separator_is_preserved_without_creating_a_rule(self):
+        data=tagged_pdf(missing_note=True)
+        self.assertEqual(office_layout.restore_rules(data,{},{}),data)
     def test_only_tagged_rule_moves_and_continuation_reaches_right_margin(self):
         for continued in (False,True):
             result=office_layout.restore_rules(tagged_pdf(continued,True),self.tags,{'separator':35.45,'continuationSeparator':24})
@@ -41,8 +46,18 @@ class OfficeLayout(unittest.TestCase):
         with self.assertRaisesRegex(ValueError,'безопасно'):
             office_layout.restore_rules(tagged_pdf(),{'#111111':{'width':468,'original':'#000000'}},{'separator':35.45,'continuationSeparator':0})
 
+    def test_second_section_note_uses_first_content_page_not_container_hint(self):
+        result=office_layout.restore_rules(tagged_pdf(continued=True,second_note=True),self.tags,{'separator':35.45,'continuationSeparator':0})
+        points=[v for v,op in PdfReader(BytesIO(result)).pages[-1].get_contents().operations if op in (b'm',b'l')]
+        self.assertAlmostEqual(points[0][0],107.45)
+
+    def test_explicitly_absent_regular_rule_removes_only_its_tagged_path(self):
+        result=office_layout.restore_rules(tagged_pdf(extra_path=True),self.tags,{'separator':35.45,'continuationSeparator':0,'separator_visible':False})
+        points=[v for v,op in PdfReader(BytesIO(result)).pages[-1].get_contents().operations if op in (b'm',b'l')]
+        self.assertEqual(points,[[72,250],[216,250]])
+
     def test_inherited_indents_hanging_and_original_package_unchanged(self):
-        source=footnotes();self.assertEqual(office_layout.separator_offsets(source),{'separator':35.45,'continuationSeparator':35.45})
+        source=footnotes();self.assertEqual(office_layout.separator_offsets(source)['separator'],35.45)
         parts=word.package(source);before=parts.copy();root=word.xml(parts[word.FOOT]);p=root[0].find('w:p/w:pPr',word.NS)
         ind=p.find('w:ind',word.NS);ind.attrib.clear();ind.set('{'+word.W+'}hanging','120')
         E.SubElement(p,'{'+word.W+'}pStyle',{'{'+word.W+'}val':'Inset'})
