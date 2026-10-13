@@ -126,7 +126,7 @@ def main():
         name='signature-'+str(keep).lower();dire=out/name
         report['cases'][name]=pdf_summary(export(signature(keep),dire,engine),dire)
         if keep:
-            note=fitz.open(dire/'Main document.pdf');images=[i for i,p in enumerate(note) if p.get_images()]
+            note=fitz.open(dire/'Main document.pdf');images=[i for i,p in enumerate(note) if any(p.get_image_rects(im[0]) for im in p.get_images())]
             for label in ['Respectfully submitted','Fictional Person','Counsel in synthetic example']:
                 assert [i for i,p in enumerate(note) if label in p.get_text()]==images,('grouped signature split',label)
     for font in ['Times New Roman','Missing Synthetic Font']:
