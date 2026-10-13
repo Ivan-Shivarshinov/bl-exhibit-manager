@@ -1,0 +1,6 @@
+import React,{useState} from 'react';
+export default function LibraryUsage({api,lid,mid,onNavigate,blocked}) {
+  const [result,setResult]=useState(null),[loading,setLoading]=useState(false),[error,setError]=useState('');
+  async function load(){setLoading(true);setError('');try{setResult(await api(`/libraries/${lid}/materials/${mid}/usage`));}catch(e){setError(e.message);}finally{setLoading(false);}}
+  return <section><button disabled={blocked||loading} onClick={load}>Где используется · обновить справку</button>{loading&&<p role="status">Проверяем локальные подачи…</p>}{error&&<p role="alert" className="error-note">{error}</p>}{result&&<><p className="muted">{result.scope}</p>{result.items.length===0?<p>В доступных локальных подачах материал не найден.</p>:<ul>{result.items.map(r=><li key={`${r.project_id}-${r.document_id}`}><button disabled={blocked} onClick={()=>onNavigate(r.project_id,r.document_id)}>{r.name} · {r.identifier}</button> · версия {r.version_number}. {r.newer?'Есть более поздняя версия.':''} {r.local_changed?'Есть местные изменения.':''} {!r.identity_valid?'Идентичность источника не подтверждена.':''}</li>)}</ul>}{result.errors.map(r=><p key={r.project_id} className="pending">{r.message}</p>)}</>}</section>;
+}

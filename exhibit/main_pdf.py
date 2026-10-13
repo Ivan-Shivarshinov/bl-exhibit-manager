@@ -15,12 +15,12 @@ import sys
 from lxml import etree as E
 from pypdf import PdfReader, PdfWriter
 from pypdf.generic import ArrayObject, BooleanObject, DictionaryObject, NameObject, NumberObject, TextStringObject
-from . import word, office_compat
+from . import word, office_compat, office_layout
 from .external_process import popen
 
 CONVERSION_LOCK = Lock()
 TIMEOUT = 120
-CONVERSION_VERSION = 3
+CONVERSION_VERSION = 4
 
 
 def available():
@@ -111,7 +111,10 @@ def office_export(source, target, directory, engine):
         # A private profile avoids using or modifying the user's open LibreOffice session.
         (profile / "user").mkdir()
         (profile / "user/registrymodifications.xcu").write_text('''<?xml version="1.0"?><oor:items xmlns:oor="http://openoffice.org/2001/registry"><item oor:path="/org.openoffice.Office.Common/Security/Scripting"><prop oor:name="MacroSecurityLevel" oor:op="fuse"><value>3</value></prop></item><item oor:path="/org.openoffice.Office.Writer/Content/Update"><prop oor:name="Link" oor:op="fuse"><value>2</value></prop></item></oor:items>''', encoding="utf-8")
-        command = [engine["executable"], "-env:UserInstallation="+profile.as_uri(), "--headless", "--nologo", "--norestore", "--convert-to", "pdf:writer_pdf_Export", "--outdir", str(target.parent), str(source)]
+        export_format = 'fodt:OpenDocument Text Flat XML' if target.suffix=='.fodt' else 'pdf:writer_pdf_Export:{"UseTaggedPDF":{"type":"boolean","value":"true"}}'
+        command = [engine["executable"], "-env:UserInstallation="+profile.as_uri(), "--headless", "--nologo", "--norestore"]
+        if source.suffix=='.fodt':command += ['--infilter=OpenDocument Text Flat XML']
+        command += ["--convert-to", export_format, "--outdir", str(target.parent), str(source)]
     proc = popen(command, cwd=directory, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **flags)
     try:
         result = proc.wait(timeout=TIMEOUT)
@@ -144,7 +147,17 @@ def convert_docx(data, paths):
         source = directory / "Main document.docx"
         target = directory / "Main document.pdf"
         source.write_bytes(marked)
-        try: office_export(source, target, directory, engine)
+        try:
+            offsets=office_layout.separator_offsets(marked) if engine['engine']=='libreoffice' else None
+            if offsets:
+                intermediate=directory/'Main document.fodt'
+                office_export(source,intermediate,directory,engine)
+                tagged,tags=office_layout.tag_rules(intermediate.read_bytes())
+                conversion=directory/'tagged';conversion.mkdir()
+                source=conversion/'Main document.fodt';target=conversion/'Main document.pdf';source.write_bytes(tagged)
+                office_export(source,target,conversion,engine)
+                target.write_bytes(office_layout.restore_rules(target.read_bytes(),tags,offsets))
+            else:office_export(source, target, directory, engine)
         except OSError as exc: raise ValueError("Не удалось запустить локальный конвертер PDF. Проверьте его установку.") from exc
         result = portable_links(target.read_bytes(), markers)
     return result

@@ -183,16 +183,16 @@ class BackupTests(TestCase):
         before = (self.store.folder(self.p['id'])/'project.json').read_bytes()
         def migrate(p): p['schema'] = 2; p['new_setting'] = 'yes'; return p
         with patch.object(schema, 'CURRENT', 2), patch.dict(schema.UPGRADES, {1:migrate}):
-            updated = self.store.load(self.p['id'])
+            updated = schema.upgrade(self.store, self.store.load(self.p['id']), target=2)
             self.assertEqual(updated['schema'], 2)
             archives = list((self.store.root/'backups').glob('*.zip'))
             with ZipFile(archives[0]) as z: self.assertEqual(z.read('project.json'), before)
         self.store.save(self.p)
         with patch.object(schema, 'CURRENT', 2), patch.dict(schema.UPGRADES, {1:lambda p: (_ for _ in ()).throw(ValueError('bad upgrade'))}):
-            with self.assertRaisesRegex(ValueError, 'Прежнее состояние'): self.store.load(self.p['id'])
+            with self.assertRaisesRegex(ValueError, 'Прежнее состояние'): schema.upgrade(self.store, self.store.load(self.p['id']), target=2)
         self.assertEqual((self.store.folder(self.p['id'])/'project.json').read_bytes(), before)
         with patch.object(schema, 'CURRENT', 2), patch.dict(schema.UPGRADES, {1:migrate}), patch.object(backup, 'save_archive', side_effect=OSError('full')):
-            with self.assertRaisesRegex(ValueError, 'свободное место'): self.store.load(self.p['id'])
+            with self.assertRaisesRegex(ValueError, 'свободное место'): schema.upgrade(self.store, self.store.load(self.p['id']), target=2)
         self.assertEqual((self.store.folder(self.p['id'])/'project.json').read_bytes(), before)
 
     def test_failed_archive_write_removes_partial_file(self):

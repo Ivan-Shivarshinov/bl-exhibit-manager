@@ -34,7 +34,7 @@ def identifier(doc, p=None):
 
 
 def review_digest(doc, style):
-    return digest({"doc": {k: v for k, v in doc.items() if k not in ("approved", "identifier", "format_overrides", "filename_mode", "short_title")}, "style": style})
+    return digest({"doc": {k: v for k, v in doc.items() if k not in ("approved", "identifier", "format_overrides", "filename_mode", "short_title", "provenance", "translation_binding")}, "style": style})
 
 
 def group_key(folder):
@@ -107,7 +107,7 @@ class Store:
         if not isinstance(p, dict) or p.get('id') != pid:
             raise ValueError('Идентификатор проекта не соответствует папке. Файлы не изменены.')
         from .schema import upgrade
-        return upgrade(self, p)
+        return upgrade(self, p, target=p.get('schema'))
 
     def save(self, p):
         folder = self.folder(p["id"])
@@ -143,10 +143,10 @@ class Store:
             raise ValueError("Исходный файл изменён вне инструмента. Замените его и проверьте результат заново.")
         return data
 
-    def put(self, p, name, data, kind):
+    def put(self, p, name, data, kind, *, allow_forms=False):
         if not data or len(data) > 50_000_000 or not name.lower().endswith("."+kind):
             raise ValueError(f"Ожидается {kind.upper()} размером до 50 МБ.")
-        meta = pdf.inspect_pdf(data) if kind == "pdf" else {}
+        meta = pdf.inspect_pdf(data, allow_forms=allow_forms) if kind == "pdf" else {}
         if kind == "docx":
             word.package(data)
         hash_ = sha256(data).hexdigest()
@@ -168,7 +168,7 @@ class Store:
     def upload(self, p, name, data, kind="original", did=None, mode="prepare"):
         if mode not in ("prepare", "passthrough") or (mode == "passthrough" and (kind != "original" or did)):
             raise ValueError("Загрузка готового PDF доступна только для нового приложения.")
-        source = self.put(p, name, data, "docx" if kind == "main" else "pdf")
+        source = self.put(p, name, data, "docx" if kind == "main" else "pdf", allow_forms=mode=='passthrough')
         if kind == "main":
             previous = deepcopy(p)
             prior_bindings = p.get('restored_word_bindings', {}).get((p.get('main') or {}).get('sha256'), [])
@@ -205,6 +205,7 @@ class Store:
             doc[kind] = source
             doc["selection" if kind == "original" else "translation_selection"] = [{"page": n+1} for n in range(source["pages"])]
             doc["translation_confirmed"] = False
+            doc.pop('translation_binding', None)
             doc["approved"] = None
         else:
             stem = Path(name).stem
@@ -247,6 +248,10 @@ class Store:
             raise ValueError('Короткое название: не более 250 символов.')
         if draft["mode"] not in ("prepare", "passthrough") or draft["designation"] not in ("Exhibit", "Annex", ""):
             raise ValueError("Некорректный режим или обозначение.")
+        if draft['mode'] == 'prepare' and doc['mode'] != 'prepare':
+            pdf.inspect_pdf(self.source(p, draft['original']))
+            if draft.get('translation'):
+                pdf.inspect_pdf(self.source(p, draft['translation']))
         if draft["number"] is not None and (type(draft["number"]) is not int or draft["number"] < 1):
             raise ValueError("Номер должен быть положительным целым числом.")
         if not isinstance(draft['prefix'],str) or (draft["prefix"] and not re.fullmatch(r"[A-Za-z][A-Za-z0-9]*(?:-[A-Za-z0-9]+)*", draft["prefix"])):
@@ -275,6 +280,8 @@ class Store:
             layer.update(changes["style"] or {})
         if "mode" in changes and changes["mode"] != doc["mode"]:
             doc["approved"] = None
+        if doc.get('translation_binding') and any(key in changes and changes[key] != doc.get(key) for key in ('selection','translation_selection')):
+            doc['translation_confirmed'] = False
         doc.update(changes)
         doc["format_overrides"] = layer
         if "filename" in changes:
@@ -306,10 +313,13 @@ class Store:
                 raise ValueError("Перевод не прикреплён.")
             self.source(p, doc["translation"])
             doc["translation_confirmed"] = True
+            from .library import binding
+            doc['translation_binding'] = binding(doc)
         elif action == "remove_translation":
             doc["translation"] = None
             doc["translation_selection"] = []
             doc["translation_confirmed"] = False
+            doc.pop('translation_binding', None)
         elif action == "document":
             if doc["translation"] and not doc["translation_confirmed"]:
                 raise ValueError("Сначала подтвердите проверку перевода.")
@@ -492,13 +502,16 @@ class Store:
         engine = main_pdf.available()
         result = {k: v for k, v in engine.items() if k != "executable"}
         result["ready"] = False
+        if p.get('main') and engine.get('available'):
+            from . import font_diagnostics
+            result['fonts'] = font_diagnostics.inspect(self.source(p,p['main']),engine)
         if p["main"] and p.get("scanned") and p["links_reviewed"]:
             key, _, _ = self.main_pdf_key(p)
             folder = self.folder(p["id"]) / "main-pdf"
             try:
                 meta = json.loads((folder / (key+".json")).read_text("utf-8"))
                 if sha256((folder / (key+".pdf")).read_bytes()).hexdigest() == meta["sha256"]:
-                    result.update(ready=True, pages=meta["pages"], converted_with=meta["engine"], key=key)
+                    result.update(ready=True, pages=meta["pages"], converted_with=meta["engine"], key=key, rendered_fonts=meta.get('rendered_fonts'))
             except (OSError, ValueError, KeyError): pass
         return result
 
@@ -512,6 +525,8 @@ class Store:
         result = main_pdf.convert_docx(data, list(paths.values()))
         folder.mkdir(exist_ok=True)
         meta = {"sha256": sha256(result).hexdigest(), "pages": pdf.inspect_pdf(result)["pages"], "engine": main_pdf.available()["label"]}
+        from . import font_diagnostics
+        meta['rendered_fonts']=font_diagnostics.pdf_report(result,font_diagnostics.required_families(data))
         with LOCK:
             temp = folder / (key+".tmp")
             temp.write_bytes(result); os.replace(temp, folder / (key+".pdf"))
