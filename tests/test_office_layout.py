@@ -84,6 +84,7 @@ class OfficeLayout(unittest.TestCase):
         self.assertIn('В созданном PDF',result['message'])
         self.assertNotEqual(font_diagnostics._pdf_family('ArialNarrowMT'),font_diagnostics.normalized('Arial'))
         self.assertEqual(font_diagnostics._pdf_family('TimesNewRomanPS-BoldItalicMT'),font_diagnostics.normalized('Times New Roman'))
+        self.assertEqual(font_diagnostics._pdf_family('TimesNewRoman'),font_diagnostics.normalized('Times New Roman'))
 
     def test_fodt_marker_only_changes_rule_colour_and_avoids_existing_colour(self):
         data=b'''<office:document xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0"><style:page-layout><style:page-layout-properties fo:page-width="8.5in" fo:margin-left="1in" fo:margin-right="1in"><style:footnote-sep style:adjustment="left" style:rel-width="25%" style:color="#092137"/></style:page-layout-properties></style:page-layout></office:document>'''
