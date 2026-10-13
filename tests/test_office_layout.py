@@ -61,6 +61,13 @@ class OfficeLayout(unittest.TestCase):
         with patch.object(font_diagnostics,'_inventory',return_value=({'missingtestfamily'},True)):
             self.assertEqual(font_diagnostics.inspect(data,{'engine':'libreoffice'})['missing'],[])
 
+    def test_pdf_family_confirmation_is_independent_of_installed_fonts(self):
+        from reportlab.pdfgen import canvas
+        out=BytesIO();c=canvas.Canvas(out);c.setFont('Times-Roman',12);c.drawString(72,700,'Synthetic text');c.save()
+        result=font_diagnostics.pdf_report(out.getvalue(),['Times New Roman'])
+        self.assertIn('Times-Roman',result['names']);self.assertEqual(result['unconfirmed'],['Times New Roman'])
+        self.assertIn('В созданном PDF',result['message'])
+
     def test_fodt_marker_only_changes_rule_colour_and_avoids_existing_colour(self):
         data=b'''<office:document xmlns:office="urn:oasis:names:tc:opendocument:xmlns:office:1.0" xmlns:style="urn:oasis:names:tc:opendocument:xmlns:style:1.0" xmlns:fo="urn:oasis:names:tc:opendocument:xmlns:xsl-fo-compatible:1.0"><style:page-layout><style:page-layout-properties fo:page-width="8.5in" fo:margin-left="1in" fo:margin-right="1in"><style:footnote-sep style:adjustment="left" style:rel-width="25%" style:color="#092137"/></style:page-layout-properties></style:page-layout></office:document>'''
         tagged,tags=office_layout.tag_rules(data);self.assertNotIn('#092137',tags)
