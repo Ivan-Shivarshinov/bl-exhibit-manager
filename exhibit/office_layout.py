@@ -27,9 +27,10 @@ def separator_offsets(data):
     root=word.xml(parts[word.FOOT]); result={}
     for kind in ('separator','continuationSeparator'):
         note=next((n for n in root if n.get(f'{{{word.W}}}type')==kind),None)
-        if note is None:result[kind]=0.;continue
+        if note is None:result[kind]=0.;result[kind+'_visible']=True;continue
         ps=note.findall('w:p',word.NS)
         if len(ps)!=1 or note.findall('.//w:t',word.NS) or note.findall('.//w:drawing',word.NS):raise ValueError(ERROR)
+        result[kind+'_visible']=bool(note.findall('.//w:'+kind,word.NS))
         props=ps[0].find('w:pPr',word.NS)
         style=props.find('w:pStyle',word.NS) if props is not None else None
         sid=style.get(f'{{{word.W}}}val') if style is not None else defaultstyle
@@ -50,6 +51,7 @@ def separator_offsets(data):
         if jc not in ('left','start','both') or any(k.endswith('Chars') for k in ind):raise ValueError(ERROR)
         try:result[kind]=(int(ind.get('start',ind.get('left',0)))+int(ind.get('firstLine',0))-int(ind.get('hanging',0)))/20
         except (TypeError,ValueError):raise ValueError(ERROR) from None
+    if not result['separator_visible'] and not result['continuationSeparator_visible']:return None
     return result
 
 def _points(value):
@@ -63,7 +65,7 @@ def tag_rules(data):
         props=layout.find('{'+STYLE+'}page-layout-properties')
         if props is None:continue
         rule=props.find('{'+STYLE+'}footnote-sep')
-        if rule is None or rule.get('{'+STYLE+'}rel-width')=='0%':continue
+        if rule is None:continue
         width=_points(props.get('{'+FO+'}page-width'))-_points(props.get('{'+FO+'}margin-left'))-_points(props.get('{'+FO+'}margin-right'))
         if rule.get('{'+STYLE+'}adjustment')!='left':raise ValueError(ERROR)
         color=next('#'+f'{n:06x}' for n in range(0x092137,0x092237) if '#'+f'{n:06x}' not in {c.lower() for c in used})
@@ -71,6 +73,11 @@ def tag_rules(data):
         original=rule.get('{'+STYLE+'}color','#000000')
         tags[color]={'width':width,'original':original}
         rule.set('{'+STYLE+'}color',color)
+        # DOCX stores one global separator. Writer can serialize later section
+        # styles with 0% even though the same global separator is still required.
+        # Its FODT importer then draws an untagged default rule. Normalize that
+        # lost per-section flag in the disposable copy before marking the path.
+        if rule.get('{'+STYLE+'}rel-width')=='0%':rule.set('{'+STYLE+'}rel-width','25%')
     return E.tostring(root,xml_declaration=True,encoding='UTF-8'),tags
 
 def _note_marks(reader):
@@ -85,15 +92,20 @@ def _note_marks(reader):
         elif isinstance(value,dict):
             pg=value.get('/Pg')
             if pg is not None:page=pageids.get(pg.idnum)
-            if value.get('/S')=='/Note':note=page
+            if value.get('/S')=='/Note':note=id(value)
             if '/MCID' in value and note is not None and page is not None:marks[(page,int(value['/MCID']))]=note
             if '/K' in value:visit(value['/K'],page,note)
         elif isinstance(value,int) and note is not None and page is not None:marks[(page,int(value))]=note
     struct=reader.trailer['/Root'].get('/StructTreeRoot')
     if struct:visit(struct.get_object().get('/K',[]))
-    return marks
+    # Writer can leave /Pg on the Note container pointing at the first document
+    # page. Its actual marked content, not that container hint, locates the note.
+    starts={}
+    for (page,_),note in marks.items():starts[note]=min(page,starts.get(note,page))
+    return {key:starts[note] for key,note in marks.items()}
 
 def restore_rules(data,tags,offsets):
+    if not tags:return data
     reader=PdfReader(BytesIO(data));marks=_note_marks(reader);writer=PdfWriter(clone_from=reader)
     rgb=lambda color:tuple(int(color[i:i+2],16)/255 for i in (1,3,5))
     tagcolors={rgb(k):v for k,v in tags.items()}
@@ -105,7 +117,7 @@ def restore_rules(data,tags,offsets):
         if stream is None:continue
         ops=stream.operations
         firstnote=next((marks[(pi,int(v[1]['/MCID']))] for v,op in ops if op==b'BDC' and len(v)==2 and isinstance(v[1],dict) and '/MCID' in v[1] and (pi,int(v[1]['/MCID'])) in marks),None)
-        current=None;paths=[];targets=[];colors=[]
+        current=None;paths=[];targets=[];colors=[];remove=set()
         for i,(vals,op) in enumerate(ops):
             if op==b'EMC':
                 if paths:raise ValueError(ERROR)
@@ -120,18 +132,26 @@ def restore_rules(data,tags,offsets):
                 if not paths or firstnote is None:raise ValueError(ERROR)
                 xs=[float(ops[i][0][0]) for i in paths];ys=[float(ops[i][0][1]) for i in paths]
                 if len(paths)!=5 or max(ys)-min(ys)>2 or abs(max(xs)-min(xs)-144)>1:raise ValueError(ERROR)
-                targets.append((list(paths),min(xs),max(xs),current));paths=[]
+                targets.append((list(paths),min(xs),max(xs),current,i));paths=[]
             elif current and op not in (b'q',b'Q',b'h',b'w',b'J',b'j',b'd',b'rg',b'RG',b'EMC'):
                 raise ValueError(ERROR)
         if not targets:continue
         if len(targets) not in (1,2):raise ValueError(ERROR)
         continued=firstnote<pi;dx=offsets['continuationSeparator' if continued else 'separator']
-        for indices,xmin,xmax,t in targets:
+        visible=offsets.get(('continuationSeparator' if continued else 'separator')+'_visible',True)
+        for indices,xmin,xmax,t,paint in targets:
+            if not visible:
+                remove.update(indices);remove.add(paint)
+                # The close-path operator between the coordinates and paint
+                # belongs to this same uniquely marked rule only.
+                remove.update(i for i in range(indices[-1]+1,paint) if ops[i][1]==b'h')
+                continue
             newwidth=t['width']-dx if continued else xmax-xmin
             for idx in indices:
                 vals=ops[idx][0];vals[0]=FloatObject(xmin+dx+(float(vals[0])-xmin)*newwidth/(xmax-xmin))
         for idx in colors:
             vals,op=ops[idx];ops[idx]=([FloatObject(v) for v in rgb(targets[0][3]['original'])],op)
+        if remove:stream.operations=[op for i,op in enumerate(ops) if i not in remove]
         page.replace_contents(stream);changed+=1
     if not changed:raise ValueError(ERROR)
     out=BytesIO();writer.write(out);return out.getvalue()
