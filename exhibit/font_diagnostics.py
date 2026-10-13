@@ -8,6 +8,16 @@ from pypdf import PdfReader
 
 def normalized(name):return re.sub(r'[^\w]','',name.casefold())
 
+def _pdf_family(name):
+    result=normalized(name)
+    # PostScript face suffixes are not family names. Match whole families:
+    # Arial Narrow must not count as proof that requested Arial survived.
+    for suffix in ['psbolditalicmt','psboldmt','psitalicmt','psmt','bolditalicmt','boldmt','italicmt','mt']:
+        if result.endswith(suffix):result=result[:-len(suffix)];break
+    for suffix in ['bolditalic','boldoblique','regular','italic','oblique','bold','roman']:
+        if result.endswith(suffix):result=result[:-len(suffix)];break
+    return result
+
 def _font_names(path):
     names=set()
     try:
@@ -143,6 +153,6 @@ def pdf_report(data,required):
             seen.add(key);o=v.get_object()
             if o.get('/Subtype')=='/Form' and '/Resources' in o:resources(o['/Resources'])
     for page in reader.pages:resources(page.get('/Resources',{}))
-    missing=[family for family in required if not any(normalized(name).startswith(normalized(family)) for name in names)]
+    missing=[family for family in required if not any(_pdf_family(name)==normalized(family) for name in names)]
     return {'names':sorted(names),'unconfirmed':missing,'message':
             'В созданном PDF не подтверждены шрифты: '+', '.join(missing)+'. Возможна замена шрифтов конвертером. Сверьте переносы и подпись с Word; установите требуемые шрифты для конвертера и подготовьте PDF заново.' if missing else ''}
