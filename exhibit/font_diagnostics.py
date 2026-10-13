@@ -13,9 +13,9 @@ def _pdf_family(name):
     # PostScript face suffixes are not family names. Match whole families:
     # Arial Narrow must not count as proof that requested Arial survived.
     for suffix in ['psbolditalicmt','psboldmt','psitalicmt','psmt','bolditalicmt','boldmt','italicmt','mt']:
-        if result.endswith(suffix):result=result[:-len(suffix)];break
+        if result.endswith(suffix):return result[:-len(suffix)]
     for suffix in ['bolditalic','boldoblique','regular','italic','oblique','bold','roman']:
-        if result.endswith(suffix):result=result[:-len(suffix)];break
+        if result.endswith(suffix) and (suffix!='roman' or name.casefold().endswith('-roman')):result=result[:-len(suffix)];break
     return result
 
 def _font_names(path):
