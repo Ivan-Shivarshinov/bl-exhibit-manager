@@ -209,6 +209,17 @@ def main():
             assert request(f'/api/projects/{pid}/exports/{first_export}')==package
             assert (folder/'LICENSE').is_file() and (folder/'THIRD-PARTY-NOTICES/PYTHON-LICENSE.txt').is_file()
             print(json.dumps({'bundle':archive.name,'platform':sys.platform,'version':health['version'],'checks':['isolated start','static UI and optional Word pane assets','panel presence protocol (simulated Word host)','duplicate start','demo DOCX/PDF','PDFium rendering','structured extraction','PDF ZIP export','ready PDF upload and batch byte preservation','DOCX revisions without panel','immutable ZIP history','graceful stop','relocation and project persistence','licenses'],'result':'passed'}))
+        except BaseException:
+            # Helpers have their own request wrappers; retain the server traceback
+            # before the isolated directory disappears on a native CI failure.
+            log=data/'application.log'
+            if log.exists():
+                time.sleep(.5)
+                evidence=Path('output/native-ready-qa')/archive.stem.split('0.5.0-')[-1]
+                evidence.mkdir(parents=True,exist_ok=True)
+                shutil.copyfile(log,evidence/'application-failure.log')
+                print(log.read_text('utf-8',errors='replace')[-16000:])
+            raise
         finally:
             command('--stop')
             if os.name=='nt':

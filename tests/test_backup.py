@@ -35,6 +35,23 @@ class BackupTests(TestCase):
         backup.save_archive(self.store, self.p['id'], self.archive)
         return self.archive
 
+    def test_finished_download_can_disappear_during_next_archive_cleanup(self):
+        old = backup.work_folder(self.store)
+        original = Path.is_dir
+
+        def finished_download(path):
+            exists = original(path)
+            if path == old and exists:
+                # FileResponse's background cleanup finishes between the scan
+                # and stat of the previous download's temporary directory.
+                path.rmdir()
+            return exists
+
+        with patch.object(Path, 'is_dir', finished_download):
+            created = backup.work_folder(self.store)
+        self.assertTrue(created.is_dir())
+        self.assertNotEqual(created, old)
+
     def rewrite(self, transform):
         with ZipFile(self.archive) as z: parts = {n: z.read(n) for n in z.namelist()}
         transform(parts)

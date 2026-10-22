@@ -288,8 +288,12 @@ def work_folder(store, token=None):
         return folder
     # Abandoned uploads after a closed browser/server restart expire in 24 hours.
     for folder in parent.iterdir():
-        if re.fullmatch(ID, folder.name) and folder.is_dir() and time.time()-folder.stat().st_mtime > 86400:
-            shutil.rmtree(folder)
+        try:
+            if re.fullmatch(ID, folder.name) and folder.is_dir() and time.time()-folder.stat().st_mtime > 86400:
+                shutil.rmtree(folder)
+        except FileNotFoundError:
+            # A completed download or another cleanup can remove it meanwhile.
+            continue
     folder = parent/uuid4().hex; folder.mkdir()
     return folder
 
