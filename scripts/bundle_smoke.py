@@ -56,7 +56,7 @@ def main():
                 raise AssertionError(f'{path}: HTTP {exc.code}: '+exc.read().decode(errors='replace')+'\n'+(log.read_text('utf-8',errors='replace')[-16000:] if log.exists() else 'No server log')) from exc
         try:
             command('--no-browser')
-            health=request('/api/health');assert health['version']=='0.5.0'
+            health=request('/api/health');assert health['version']=='0.5.1'
             html=request('/').decode();assert 'root' in html
             for asset in re.findall(r'(?:src|href)="(/assets/[^\"]+)"',html):assert len(request(asset))>100
             assert request('/api/word/status')['configured'] is False
@@ -75,7 +75,7 @@ def main():
             assert b'BEGIN CERTIFICATE' in certificate and b'PRIVATE KEY' not in certificate
             context=ssl.create_default_context(cadata=certificate.decode())
             with urlopen(f'https://localhost:{tls_port}/api/health',context=context,timeout=5) as response:
-                assert json.load(response)['version']=='0.5.0'
+                assert json.load(response)['version']=='0.5.1'
             # Protocol smoke with an explicitly simulated Word host. This does
             # not claim Office.js validation in a real Word application.
             def panel(body):
@@ -160,7 +160,7 @@ def main():
             (data/pid/f'translation-{did}.json').write_text(json.dumps(draft),'utf-8')
             token=request(f'/api/projects/{pid}/backup',{})['token']
             saved=request(f'/api/backups/{token}/download')
-            target=archive.stem.split('0.5.0-')[-1]
+            target=archive.stem.split('0.5.1-')[-1]
             outgoing=Path('output/backup-exchange')/target;outgoing.mkdir(parents=True,exist_ok=True)
             (outgoing/'project.zip').write_bytes(saved)
             check=request('/api/backups/preview',raw=saved);assert check['conflict'] and check['summary']['exports']==3
@@ -215,7 +215,7 @@ def main():
             log=data/'application.log'
             if log.exists():
                 time.sleep(.5)
-                evidence=Path('output/native-ready-qa')/archive.stem.split('0.5.0-')[-1]
+                evidence=Path('output/native-ready-qa')/archive.stem.split('0.5.1-')[-1]
                 evidence.mkdir(parents=True,exist_ok=True)
                 shutil.copyfile(log,evidence/'application-failure.log')
                 print(log.read_text('utf-8',errors='replace')[-16000:])
