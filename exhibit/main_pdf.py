@@ -15,12 +15,12 @@ import sys
 from lxml import etree as E
 from pypdf import PdfReader, PdfWriter
 from pypdf.generic import ArrayObject, BooleanObject, DictionaryObject, NameObject, NumberObject, TextStringObject
-from . import word, office_compat, office_layout
+from . import word, office_compat, office_layout, pdf_link_recovery
 from .external_process import popen
 
 CONVERSION_LOCK = Lock()
 TIMEOUT = 120
-CONVERSION_VERSION = 4
+CONVERSION_VERSION = 5
 
 
 def available():
@@ -66,8 +66,10 @@ def marked_docx(data, paths):
     return out.getvalue(), markers
 
 
-def portable_links(data, markers):
+def portable_links(data, markers, source=None):
     try:
+        if source is not None:
+            data = pdf_link_recovery.recover(data, markers, source)
         reader = PdfReader(BytesIO(data))
         if reader.is_encrypted or not reader.pages: raise ValueError("Конвертер вернул пустой или защищённый PDF.")
         writer = PdfWriter(clone_from=reader)
@@ -92,7 +94,11 @@ def portable_links(data, markers):
                 annotation[NameObject('/H')]=NameObject('/N')
                 seen[uri] += 1
         missing = set(markers) - seen.keys()
-        if missing: raise ValueError(f"При конвертации потеряны ссылки на приложения: {len(missing)}. PDF и ZIP не выданы. Проверьте сноски в исходном Word.")
+        if missing:
+            notes = pdf_link_recovery.source_notes(source, markers) if source else {}
+            numbers = sorted({notes[m]['number'] for m in missing if m in notes}, key=int)
+            detail = (' Сноски: '+', '.join(numbers)+'.') if numbers else ''
+            raise ValueError(f"При конвертации потеряны ссылки на приложения: {len(missing)}.{detail} PDF и ZIP не выданы. Исходный Word сохранён. Сохраните архив проекта для проверки ошибки конвертации.")
         out = BytesIO(); writer.write(out)
         return out.getvalue()
     except ValueError:
@@ -159,5 +165,5 @@ def convert_docx(data, paths):
                 target.write_bytes(office_layout.restore_rules(target.read_bytes(),tags,offsets))
             else:office_export(source, target, directory, engine)
         except OSError as exc: raise ValueError("Не удалось запустить локальный конвертер PDF. Проверьте его установку.") from exc
-        result = portable_links(target.read_bytes(), markers)
+        result = portable_links(target.read_bytes(), markers, marked)
     return result
