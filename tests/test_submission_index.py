@@ -11,7 +11,7 @@ from threading import Event
 
 from pypdf import PdfReader
 from exhibit import backup, history, index_documents, index_settings, submission_index as index
-from exhibit.project import Store
+from exhibit.project import Store, LOCK
 from exhibit.samples import make_pdf
 from tests.pdf_forms import form_pdf
 
@@ -125,7 +125,9 @@ class IndexTests(TestCase):
         with patch.object(self.s,'prepare',side_effect=delayed),ThreadPoolExecutor(1) as pool:
             future=pool.submit(self.m.preview,self.p['id']);self.assertTrue(entered.wait(5))
             with self.assertRaisesRegex(ValueError,'уже'):self.m.preview(self.p['id'])
-            p=self.s.load(self.p['id']);p['documents'][0]['title']='Other window';self.s.save(p);release.set()
+            with LOCK:
+                p=self.s.load(self.p['id']);p['documents'][0]['title']='Other window';self.s.save(p)
+            release.set()
             with self.assertRaisesRegex(ValueError,'Обновите'):future.result()
         self.assertFalse(self.m.plans)
 
@@ -143,6 +145,22 @@ class IndexTests(TestCase):
         with patch.object(index_documents,'generate',side_effect=edit),self.assertRaisesRegex(ValueError,'Обновите'):
             self.s.export(self.p,preview['preview_token'])
         self.assertFalse(history.list_exports(self.s,self.p))
+
+    def test_preview_publication_and_final_check_share_project_write_lock(self):
+        checked,release,writer_ready,wrote=Event(),Event(),Event(),Event()
+        current=self.m.current
+        def checked_then_wait(pid,token):
+            result=current(pid,token);checked.set();release.wait(5);return result
+        def mutate():
+            writer_ready.set()
+            with LOCK:
+                p=self.s.load(self.p['id']);p['name']='Changed by another window';self.s.save(p);wrote.set()
+        with patch.object(self.m,'current',side_effect=checked_then_wait),ThreadPoolExecutor(2) as pool:
+            future=pool.submit(self.m.preview,self.p['id']);self.assertTrue(checked.wait(5))
+            with self.m.lock:
+                writer=pool.submit(mutate);self.assertTrue(writer_ready.wait(5));release.set()
+                self.assertFalse(wrote.wait(.2),'Project write slipped between final check and publication')
+            future.result();writer.result()
 
     def test_old_token_and_generator_or_history_errors_never_publish(self):
         preview=self.m.preview(self.p['id']);token=preview['preview_token']

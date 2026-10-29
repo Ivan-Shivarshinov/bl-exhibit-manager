@@ -105,9 +105,11 @@ class IndexPlans:
                     self.plans.pop(pid)['temporary'].cleanup()
                     previous = None
             if previous and previous['content_key'] == key:
-                with LOCK: self.current(pid, token)
-                result = {**previous,'token':token,'rows':ordered_rows(p,previous['entries'])}
-                self.plans[pid] = result
+                with LOCK:
+                    self.current(pid, token)
+                    with self.lock:
+                        result = {**previous,'token':token,'rows':ordered_rows(p,previous['entries'])}
+                        self.plans[pid] = result
                 return self.public(result, p)
             if previous:
                 self.plans.pop(pid)['temporary'].cleanup()
@@ -128,14 +130,15 @@ class IndexPlans:
                     entries[d['id']] = {'file':str(path),'pages':pages,'sha256':digest_bytes(data)}
                 result = {'token':token,'content_key':key,'entries':entries,'temporary':temporary,
                           'rows':ordered_rows(p,entries),'bytes':total}
-                with LOCK: self.current(pid,token)
-                with self.lock:
-                    for other in list(self.plans):
-                        if other != pid and other not in self.busy:
-                            self.plans.pop(other)['temporary'].cleanup()
-                    if total+sum(v['bytes'] for k,v in self.plans.items() if k!=pid)>MAX_BYTES:
-                        raise ValueError('Временное хранилище занято другой сборкой. Дождитесь её завершения.')
-                    self.plans[pid] = result
+                with LOCK:
+                    self.current(pid,token)
+                    with self.lock:
+                        for other in list(self.plans):
+                            if other != pid and other not in self.busy:
+                                self.plans.pop(other)['temporary'].cleanup()
+                        if total+sum(v['bytes'] for k,v in self.plans.items() if k!=pid)>MAX_BYTES:
+                            raise ValueError('Временное хранилище занято другой сборкой. Дождитесь её завершения.')
+                        self.plans[pid] = result
                 if previous: previous['temporary'].cleanup()
                 return self.public(result,p)
             except BaseException:
