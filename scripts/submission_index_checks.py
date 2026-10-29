@@ -24,8 +24,12 @@ def check_package(raw, preview, source):
             assert value==source and len(PdfReader(BytesIO(value)).pages)==row['pages']
         with ZipFile(BytesIO(z.read('Submission/Exhibit index.docx'))) as doc:
             rels=E.fromstring(doc.read('word/_rels/document.xml.rels'))
-            targets=[unquote(r.attrib['Target']) for r in rels if r.attrib.get('Type','').endswith('/hyperlink')]
+            raw_targets=[r.attrib['Target'] for r in rels if r.attrib.get('Type','').endswith('/hyperlink')]
+            targets=[unquote(t) for t in raw_targets]
             assert targets==paths
+            for target,path in zip(raw_targets,paths):
+                assert all(c in target for c in path if ord(c)>127), 'Word file IRI must retain Unicode'
+                assert '#' not in target and ' ' not in target and '?' not in target
             text=''.join(E.fromstring(doc.read('word/document.xml')).itertext())
             assert all(r['identifier'] in text and r['title'] in text for r in rows)
         pdf=PdfReader(BytesIO(z.read('Submission/Exhibit index.pdf')))
@@ -33,7 +37,9 @@ def check_package(raw, preview, source):
         for page in pdf.pages:
             for a in page.get('/Annots',[]):
                 action=a.get_object()['/A'];assert action['/S']=='/GoToR'
-                targets.append(str(action['/F'].get_object()['/UF']))
+                spec=action['/F'].get_object()
+                assert spec['/F']==spec['/UF'] and not any(k in spec for k in ('/DOS','/Unix','/Mac','/FS'))
+                targets.append(str(spec['/UF']))
         assert set(targets)==set(paths)
         # Relocation, independent of localhost and of the installed app path.
         with TemporaryDirectory(prefix='bl-index-move-') as tmp:

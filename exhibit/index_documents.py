@@ -33,6 +33,16 @@ def check_text(config, rows):
                 raise ValueError(f'Шрифт перечня не поддерживает символ U+{ord(char):04X}. Измените текст перечня или название приложения.')
 
 
+def docx_target(path):
+    """Relative file IRI: retain Unicode, escape ASCII URI delimiters once.
+
+    Use Unicode file IRIs for Word instead of ASCII-only UTF-8 URI paths.
+    Spaces and literal %, # and ? still need escaping; a PDF
+    Filespec is a filename instead and must keep those characters verbatim.
+    """
+    return ''.join(quote(char, safe='/') if ord(char)<128 else char for char in path)
+
+
 def docx(config, rows):
     doc = Document();section = doc.sections[0]
     section.page_width=Mm(210);section.page_height=Mm(297)
@@ -54,7 +64,7 @@ def docx(config, rows):
         for i,key in enumerate(cols):
             if key != 'title':cells[i].text=str(row[key]);continue
             paragraph=cells[i].paragraphs[0]
-            rid=doc.part.relate_to(quote(row['path'],safe='/'),RT.HYPERLINK,is_external=True)
+            rid=doc.part.relate_to(docx_target(row['path']),RT.HYPERLINK,is_external=True)
             link=OxmlElement('w:hyperlink');link.set(qn('r:id'),rid)
             run=OxmlElement('w:r');props=OxmlElement('w:rPr')
             color=OxmlElement('w:color');color.set(qn('w:val'),'122A4B');props.append(color);run.append(props)
@@ -165,7 +175,10 @@ def targets(fmt, data):
         for ref in page.get('/Annots',[]):
             action=ref.get_object().get('/A',{})
             if action.get('/S')!='/GoToR':raise ValueError('Непереносимая ссылка перечня.')
-            spec=action['/F'].get_object();result.append(str(spec['/UF']))
+            spec=action['/F'].get_object()
+            if spec.get('/F')!=spec.get('/UF') or any(k in spec for k in ('/DOS','/Unix','/Mac','/FS')):
+                raise ValueError('Несогласованные имена файла PDF-ссылки перечня.')
+            result.append(str(spec['/UF']))
     return result
 
 
@@ -191,5 +204,5 @@ def verify_package(data, config, rows):
                         links=tr.findall('.//w:hyperlink',ns)
                         if len(links)!=1:raise ValueError('Неверные ссылки строки перечня.')
                         link=links[0];rel=rels[link.attrib['{'+ns['r']+'}id']]
-                        if rel.get('TargetMode')!='External' or unquote(rel['Target'])!=row['path'] or ''.join(t.text or '' for t in link.findall('.//w:t',ns))!=row['title']:
+                        if rel.get('TargetMode')!='External' or rel['Target']!=docx_target(row['path']) or ''.join(t.text or '' for t in link.findall('.//w:t',ns))!=row['title']:
                             raise ValueError('Название и цель строки перечня не совпадают.')
