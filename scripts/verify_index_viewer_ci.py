@@ -145,11 +145,13 @@ def main():
     for location,folder in (('before',before),('after',after)):
         for number in (12,13):
             label=f'{location}-{number}'
-            proc=subprocess.Popen([str(exe),'-new-window','-zoom','100',str(folder/'Exhibit index.pdf')],cwd=tools)
+            profile=tools/('profile-'+label);profile.mkdir()
+            proc=subprocess.Popen([str(exe),'-appdata',str(profile),'-new-window','-page','1','-zoom','100',str(folder/'Exhibit index.pdf')],cwd=tools)
             try:
                 window=wait_for(lambda:next((w for w in desktop.windows(proc.pid) if 'Exhibit index.pdf' in w['title']),None),'index window')
                 hwnd=window['hwnd'];desktop.u.ShowWindow(hwnd,9);desktop.u.SetWindowPos(hwnd,W.HWND(-1),10,10,1000,700,0x40);desktop.u.SetForegroundWindow(hwnd)
                 desktop.u.PostMessageW(hwnd,0x111,285,0) # 3.6.1 CmdZoom100
+                desktop.u.PostMessageW(hwnd,0x111,261,0) # CmdGoToFirstPage; no remembered scroll from another case.
                 scale=96/72
                 def rendered():
                     image,bounds=desktop.capture(hwnd);origin=page_origin(image,scale)
