@@ -19,7 +19,8 @@ export default function MaterialLibrary({api,p,mode='browse',documentIds=[],onCh
   const [selected,setSelected]=useState(null),[vid,setVid]=useState(''),[version,setVersion]=useState(null);
   const [chosen,setChosen]=useState([]),[rows,setRows]=useState([]),[plan,setPlan]=useState(null);
   const [commonMode,setCommonMode]=useState('prepare'),[commonFolder,setCommonFolder]=useState('');
-  const [error,setError]=useState(''),[notice,setNotice]=useState(''),[busy,setBusy]=useState(false),[loading,setLoading]=useState(true);
+  const [error,setError]=useState(''),[notice,setNotice]=useState(''),[busy,setBusy]=useState(false),[loading,setLoading]=useState(false);
+  const [librariesLoading,setLibrariesLoading]=useState(true);
   const [job,setJob]=useState(null),[revision,setRevision]=useState(0),[comment,setComment]=useState(''),[asVersion,setAsVersion]=useState(false);
   const [originalOnly,setOriginalOnly]=useState(false),[decisions,setDecisions]=useState({});
   useEffect(()=>setDecisions({}),[plan?.token]);
@@ -28,11 +29,11 @@ export default function MaterialLibrary({api,p,mode='browse',documentIds=[],onCh
   useEffect(()=>{if(version?.id===matchTarget.current&&matchedCard.current){matchedCard.current.scrollIntoView({block:'start'});matchedCard.current.focus({preventScroll:true});matchTarget.current='';}},[version,selected]);
   useEffect(()=>{const previous=document.activeElement;dialog.current.showModal();return()=>previous?.focus();},[]);
   async function refreshLibraries(){const list=await api('/libraries');setLibraries(list);setLid(old=>list.some(l=>l.id===old&&!l.error)?old:list.find(l=>!l.error)?.id||'');}
-  useEffect(()=>{refreshLibraries().catch(e=>setError(e.message)).finally(()=>setLoading(false));},[]);
+  useEffect(()=>{refreshLibraries().catch(e=>setError(e.message)).finally(()=>setLibrariesLoading(false));},[]);
   useEffect(()=>{setOffset(0);setSelected(null);setVersion(null);setChosen([]);setRows([]);setPlan(null);},[lid,query]);
   useEffect(()=>{
-    const controller=new AbortController();let live=true;setCatalog(null);
-    if(lid){setLoading(true);api(`/libraries/${lid}/materials?q=${encodeURIComponent(query)}&offset=${offset}&sort=${sort}&${new URLSearchParams(filters)}`,undefined,{signal:controller.signal})
+    const controller=new AbortController();let live=true;setCatalog(null);setLoading(!!lid);
+    if(lid){api(`/libraries/${lid}/materials?q=${encodeURIComponent(query)}&offset=${offset}&sort=${sort}&${new URLSearchParams(filters)}`,undefined,{signal:controller.signal})
       .then(value=>{if(live){setCatalog(value);setError('');}}).catch(e=>{if(live&&e.name!=='AbortError')setError(e.message);}).finally(()=>{if(live)setLoading(false);});}
     return()=>{live=false;controller.abort();};
   },[lid,query,offset,sort,revision,filters]);
@@ -59,7 +60,7 @@ export default function MaterialLibrary({api,p,mode='browse',documentIds=[],onCh
       }
     }catch(e){setError(e.message);}finally{setBusy(false);}
   }
-  async function create(){setBusy(true);setError('');try{const lib=await api('/libraries',{name:newName});await refreshLibraries();setLid(lib.id);setNewName('');}catch(e){setError(e.message);}finally{setBusy(false);}}
+  async function create(){if(busy||librariesLoading)return;setBusy(true);setError('');try{const lib=await api('/libraries',{name:newName});await refreshLibraries();setLid(lib.id);setNewName('');}catch(e){setError(e.message);}finally{setBusy(false);}}
   async function viewMatch(match,canReturn=true){try{matchReturn.current=canReturn?document.activeElement:null;const card=await api(`/libraries/${lid}/materials/${match.material_id}`);matchTarget.current=match.version_id;setSelected(card);setVid(match.version_id);}catch(e){setError(e.message);}}
   async function savedMatches(result){setRevision(n=>n+1);const reused=result.materials.filter(m=>m.action==='reuse');if(reused.length){const cards=await Promise.all(reused.map(async m=>({...await api(`/libraries/${lid}/materials/${m.material_id}`),selectedVersion:m.version_id})));setChosen(cards);await viewMatch({material_id:reused[0].material_id,version_id:reused[0].version_id},false);}}
   function select(item){setSelected(item);setVid(item.versions.at(-1));setPlan(null);}
@@ -70,13 +71,15 @@ export default function MaterialLibrary({api,p,mode='browse',documentIds=[],onCh
       return {library_id:lid,material_id:item.id,version_id:item.selectedVersion||item.versions.at(-1),title:item.latest.metadata.title,number,designation:'Annex',prefix:'',filename:`Annex ${number}.pdf`,folder:'',mode:'prepare'};
     }));setPlan(null);
   }
-  const blocked=busy||loading;
+  const blocked=busy||librariesLoading||loading;
+  // Creating a library is independent of loading another library's materials.
+  const createBlocked=busy||librariesLoading;
   const allSources=p?.documents.filter(d=>documentIds.includes(d.id))||[];
   const sourceDocs=allSources.filter(d=>!excluded.includes(d.id));
   return <dialog ref={dialog} className="library-dialog" aria-labelledby="library-title" onCancel={e=>{e.preventDefault();if(!busy)onClose();}}>
     <div className="section-heading"><div><h1 id="library-title">{mode==='save'?'Сохранить в библиотеку':'Библиотеки дел'}</h1><p className="muted">{p?`Подача: «${p.name}». `:''}Материалы копируются независимо; подачи продолжают работать без библиотеки.</p></div><button disabled={busy} onClick={onClose}>Вернуться к подаче</button></div>
     <div className="library-controls"><label className="field">Библиотека<select aria-label="Библиотека" disabled={blocked} value={lid} onChange={e=>setLid(e.target.value)}><option value="">Выберите библиотеку</option>{libraries.map(l=><option key={l.id} value={l.id}>{l.name}</option>)}</select></label>
-      <form className="actions" onSubmit={e=>{e.preventDefault();create();}}><input aria-label="Название новой библиотеки" placeholder="Название новой библиотеки" maxLength={120} required value={newName} onChange={e=>setNewName(e.target.value)} disabled={blocked}/><button disabled={blocked}>Создать библиотеку</button></form></div>
+      <form className="actions" onSubmit={e=>{e.preventDefault();create();}}><input aria-label="Название новой библиотеки" placeholder="Название новой библиотеки" maxLength={120} required value={newName} onChange={e=>setNewName(e.target.value)} disabled={createBlocked}/><button disabled={createBlocked}>Создать библиотеку</button></form></div>
     {error&&<p className="error-note" role="alert">{error}</p>}{notice&&<p className="success-note" role="status">{notice}</p>}
     {libraries.some(l=>l.error)&&<p className="pending">Есть недоступная библиотека. Её можно выбрать, чтобы прочитать причину, либо восстановить независимую копию из архива. Остальные библиотеки доступны.</p>}
     {busy&&<div className="library-progress" role="status"><p>{job?.message||'Проверяем…'} {job?.total?`${job.completed} из ${job.total}`:''}</p><progress {...(job?.total?{value:job.completed,max:job.total}:{})}/>{job?.id&&<button onClick={()=>api(`/material-operations/${job.id}/cancel`,{}).catch(e=>setError(e.message))}>Отменить операцию</button>}</div>}

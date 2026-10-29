@@ -41,6 +41,8 @@ jobs:
       - run: npm ci --prefix web
       - run: npm run build --prefix web
       - run: npx --prefix web playwright install chromium
+      - name: Verify library creation during delayed catalog loading
+        run: node --test scripts/library_loading_ui.cjs
       - run: node --test web/tests/*.test.js
       - run: python -m unittest discover -s tests -q
       - name: Verify native local Word setup (simulated Word host)
