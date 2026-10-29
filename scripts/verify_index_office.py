@@ -1,6 +1,7 @@
 """Synthetic visual evidence with a real Office converter; not a link-click test."""
 import argparse
 from io import BytesIO
+from hashlib import sha256
 import json
 from pathlib import Path
 import sys
@@ -24,8 +25,15 @@ def main():
                'path':f"Материалы # 50%/O'Brien & Co/Подпапка с длинным именем/Annex # {n}%.pdf",'pages':n%7+1} for n in range(1,81)]
         folder=out/language;folder.mkdir(exist_ok=True)
         for fmt in ('docx','pdf'):(folder/('Exhibit index.'+fmt)).write_bytes(index_documents.generate(fmt,config,rows))
+        direct_hash=sha256((folder/'Exhibit index.pdf').read_bytes()).hexdigest()
         with TemporaryDirectory(prefix='bl-index-office-') as work:
-            main_pdf.office_export(folder/'Exhibit index.docx',folder/'Office index.pdf',Path(work),engine)
+            # LibreOffice chooses the output basename from its input. Keep the
+            # real conversion separate from the directly generated PDF.
+            directory=Path(work);source=directory/'Office index.docx';target=directory/'Office index.pdf'
+            source.write_bytes((folder/'Exhibit index.docx').read_bytes())
+            main_pdf.office_export(source,target,directory,engine)
+            (folder/'Office index.pdf').write_bytes(target.read_bytes())
+        assert sha256((folder/'Exhibit index.pdf').read_bytes()).hexdigest()==direct_hash
         report['cases'][language]={}
         for name in ('Exhibit index','Office index'):
             file=folder/(name+'.pdf');reader=PdfReader(file)

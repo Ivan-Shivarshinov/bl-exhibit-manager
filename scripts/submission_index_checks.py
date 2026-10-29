@@ -70,6 +70,7 @@ def verify(request, data, outgoing, source, incoming=None, browser=None):
     assert request(route+'/exports')[-1]['size']==len(legacy)
     token=request(route+'/backup',{})['token'];saved=request('/api/backups/'+token+'/download')
     (outgoing/'index-project.zip').write_bytes(saved)
+    (outgoing/'index-model.json').write_text(json.dumps({'rows':new['rows'],'settings':new['settings']},ensure_ascii=False,indent=2),'utf-8')
     (outgoing/'index-legacy-project.zip').write_bytes(backup.read_bytes())
     check=request('/api/backups/preview',raw=saved)
     copy=request('/api/backups/'+check['token']+'/restore',{'copy':True});assert copy['id']!=pid
@@ -82,7 +83,10 @@ def verify(request, data, outgoing, source, incoming=None, browser=None):
             check=request('/api/backups/preview',raw=file.read_bytes())
             restored=request('/api/backups/'+check['token']+'/restore',{'copy':check['conflict']})
             route2='/api/projects/'+restored['id'];model=request(route2+'/submission-index/preview',{})
-            assert model['rows']==new['rows'] and model['settings']==new['settings']
+            # Compare against this archive's native preview, not against a newly
+            # created local fixture with different document IDs/source bytes.
+            expected=json.loads(file.with_name('index-model.json').read_text('utf-8'))
+            assert model['rows']==expected['rows'] and model['settings']==expected['settings']
             raw=request(route2+'/export',{'preview_token':model['preview_token']})
             # The source fixture may differ from this runner's fixture, so inspect its own original.
             original=(data/restored['id']/'inputs'/restored['documents'][0]['original']['blob']).read_bytes()

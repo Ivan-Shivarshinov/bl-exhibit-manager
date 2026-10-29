@@ -4,7 +4,7 @@ from tempfile import TemporaryDirectory
 from unittest import TestCase
 from unittest.mock import patch
 
-from exhibit import backup, index_settings, schema
+from exhibit import backup, index_settings, schema, history, submission_index
 from exhibit.project import Store
 from tests import test_library_versions as fixtures
 
@@ -78,6 +78,41 @@ class LibraryIndexSettingsTests(TestCase):
     assignments = fixtures.VersionTests.assignments
     imported = fixtures.VersionTests.imported
     v2 = fixtures.VersionTests.v2
+
+    def test_version_pages_and_rollback_change_only_selected_index_and_keep_old_zip(self):
+        from exhibit.samples import make_pdf
+        from hashlib import sha256
+        from io import BytesIO
+        from zipfile import ZipFile
+        from pypdf import PdfReader
+        self.store.update(self.p,self.d['id'],{'designation':'Exhibit'})
+        _,v1=self.save();a=self.imported(v1,3);b=self.imported(v1,12)
+        config={**index_settings.DEFAULT,'enabled':True}
+        a=index_settings.save(self.store,a,config);b=index_settings.save(self.store,b,config)
+        manager=submission_index.manager(self.store);self.addCleanup(manager.close)
+        for p in (a,b):
+            model=manager.preview(p['id']);self.store.export(p,model['preview_token'])
+        first=history.list_exports(self.store,b)[0];old_zip=history.read_export(self.store,b,first['id'])
+        tree=lambda p:{n:sha256(f.read_bytes()).hexdigest() for n,f in backup.inventory(self.store.folder(p['id']))}
+        before_a=tree(a);before_b=tree(b)
+        self.store.upload(self.p,'Translation v2.pdf',make_pdf('New translation',[['First'],['Second']]),'translation',self.d['id'])
+        self.store.approve(self.p,self.d['id'],'translation');self.store.approve(self.p,self.d['id'],'document')
+        _,v2=self.save(material_id=v1['material_id'],comment='Two-page translation')
+        for target,pages in ((v2,3),(v1,2)):
+            update=self.library.update_preview(b['id'],b['documents'][0]['id'],target['version_id'])
+            self.library.update_apply(update['token']);b=self.store.load(b['id'])
+            self.store.approve(b,b['documents'][0]['id'],'document')
+            model=manager.preview(b['id']);self.assertEqual(model['rows'][0]['pages'],pages)
+            self.assertEqual(model['rows'][0]['identifier'],'Annex 12')
+            value=self.store.export(b,model['preview_token'])
+            with ZipFile(BytesIO(value)) as z:
+                pdf=PdfReader(BytesIO(z.read('Submission/Evidence/Annex 12.pdf')))
+                self.assertEqual(len(pdf.pages),pages)
+                self.assertTrue(all('Annex 12' in p.extract_text() and 'Exhibit 12' not in p.extract_text() for p in pdf.pages))
+            self.assertTrue(history.list_exports(self.store,b)[0]['changes']['index_changed'])
+            self.assertEqual(history.read_export(self.store,b,first['id']),old_zip)
+            self.assertEqual(tree(a),before_a)
+            self.assertTrue(all(tree(b)[n]==h for n,h in before_b.items() if n!='project.json'))
 
     def test_library_import_update_rollback_and_restore_keep_index_settings(self):
         for original_schema in (1,2):
