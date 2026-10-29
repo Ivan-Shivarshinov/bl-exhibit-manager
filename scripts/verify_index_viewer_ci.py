@@ -177,7 +177,7 @@ def main():
                     return text if expected.casefold() in text.replace('/','\\').casefold() else None
                 properties=wait_for(copied,'actual opened file path')
                 report['cases'].append({'location':location,'number':number,'path':expected,'title':opened['title'],'properties':properties,'passed':True})
-                print(json.dumps(report['cases'][-1],ensure_ascii=False),flush=True)
+                print(json.dumps(report['cases'][-1],ensure_ascii=True),flush=True)
             finally:
                 proc.terminate();proc.wait(timeout=15)
                 (output/'report.json').write_text(json.dumps(report,ensure_ascii=False,indent=2),'utf-8')
