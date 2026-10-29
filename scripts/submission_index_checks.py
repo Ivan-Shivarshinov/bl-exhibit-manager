@@ -37,7 +37,7 @@ def check_package(raw, preview, source):
         assert set(targets)==set(paths)
         # Relocation, independent of localhost and of the installed app path.
         with TemporaryDirectory(prefix='bl-index-move-') as tmp:
-            root=Path(tmp);z.extractall(root/'First folder')
+            root=Path(tmp).resolve();z.extractall(root/'First folder')
             shutil.move(str(root/'First folder'/'Submission'),str(root/'Moved complete Submission'))
             for path in targets:
                 target=(root/'Moved complete Submission'/path).resolve()

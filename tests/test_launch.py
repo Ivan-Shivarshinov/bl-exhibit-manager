@@ -9,6 +9,25 @@ from exhibit import external_process
 
 
 class LaunchTests(TestCase):
+    def test_loopback_health_and_stop_need_neither_https_context_nor_proxy(self):
+        from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
+        from threading import Thread
+        import json,os
+        state={'active':True,'header':None}
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self,*args):pass
+            def do_GET(self):
+                self.send_response(200 if state['active'] else 404);self.end_headers()
+                self.wfile.write(json.dumps({'application':'bl-exhibit-manager','version':launch.__version__}).encode())
+            def do_POST(self):
+                state['header']=self.headers.get('X-Exhibit-Local');state['active']=False
+                self.send_response(200);self.end_headers();self.wfile.write(b'{}')
+        server=ThreadingHTTPServer(('127.0.0.1',0),Handler);thread=Thread(target=server.serve_forever,daemon=True);thread.start()
+        try:
+            with patch('ssl._create_default_https_context',side_effect=FileNotFoundError('unrelated HTTPS configuration')),patch.dict(os.environ,{'HTTP_PROXY':'http://127.0.0.1:1','NO_PROXY':''}):
+                self.assertEqual(launch.health(server.server_port)['version'],launch.__version__)
+                self.assertIn('остановлено',launch.stop(server.server_port));self.assertEqual(state['header'],'1')
+        finally:server.shutdown();server.server_close();thread.join()
     def test_source_and_frozen_commands_are_distinct(self):
         with patch.object(launch.sys,'frozen',False,create=True):
             self.assertEqual(launch.command('--serve')[1:3],['-m','exhibit.launch'])

@@ -7,9 +7,8 @@ import socket
 import subprocess
 import sys
 import time
-from urllib.error import URLError, HTTPError
-from urllib.request import Request, urlopen
 import webbrowser
+from http.client import HTTPConnection, HTTPException
 
 from . import __version__
 
@@ -17,11 +16,18 @@ WORKSPACE = Path(__file__).resolve().parent.parent
 
 
 def health(port):
+    connection=HTTPConnection('127.0.0.1',port,timeout=2)
     try:
-        with urlopen(f"http://127.0.0.1:{port}/api/health",timeout=2) as response:
-            info=json.load(response)
-            return info if info.get("application")=="bl-exhibit-manager" else None
-    except (URLError,OSError,ValueError):return None
+        # This is always a local HTTP probe. Do not initialize HTTPS handlers,
+        # certificate files or ambient proxy settings to contact our own listener.
+        connection.request('GET','/api/health')
+        response=connection.getresponse()
+        if response.status!=200:return None
+        info=json.loads(response.read(65536))
+        return info if isinstance(info,dict) and info.get('application')=='bl-exhibit-manager' else None
+    except (OSError,ValueError,HTTPException):
+        return None
+    finally:connection.close()
 
 
 def healthy(port):
@@ -65,14 +71,15 @@ def serve(port):
 
 def stop(port):
     if not healthy(port):return "Приложение уже остановлено."
-    request=Request(f"http://127.0.0.1:{port}/api/application/stop",data=b"{}",
-                    headers={"X-Exhibit-Local":"1","Content-Type":"application/json"},method="POST")
+    connection=HTTPConnection('127.0.0.1',port,timeout=5)
     try:
-        with urlopen(request,timeout=5) as response:json.load(response)
-    except HTTPError as exc:
-        try:message=json.load(exc).get("detail","Не удалось остановить сервер.")
-        except (ValueError,AttributeError):message="Не удалось остановить сервер."
-        raise ValueError(message) from exc
+        connection.request('POST','/api/application/stop',body=b'{}',headers={'X-Exhibit-Local':'1','Content-Type':'application/json'})
+        response=connection.getresponse();body=response.read(65536)
+        if response.status>=400:
+            try:message=json.loads(body).get('detail','Не удалось остановить сервер.')
+            except (ValueError,AttributeError):message='Не удалось остановить сервер.'
+            raise ValueError(message)
+    finally:connection.close()
     for _ in range(60):
         if not healthy(port):return "Приложение остановлено. Проекты сохранены."
         time.sleep(.25)
