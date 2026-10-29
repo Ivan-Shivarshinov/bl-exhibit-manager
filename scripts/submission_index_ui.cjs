@@ -59,7 +59,13 @@ const base=process.env.INDEX_QA_URL,output=process.env.INDEX_QA_OUTPUT;
   await page.reload();await page.getByRole('button',{name:'Проверка и экспорт',exact:true}).click();
   assert.equal(await panel.getByLabel('Заголовок перечня').inputValue(),custom);
   await page.keyboard.press('Tab');assert(await page.evaluate(()=>document.activeElement!==document.body));
+  const empty=await (await page.request.post(base+'/api/projects',{headers,data:{name:'Synthetic empty index'}})).json();
+  const enabled=await page.request.patch(`${base}/api/projects/${empty.id}/submission-index`,{headers,data:{...current.submission_index_settings,enabled:true}});assert(enabled.ok());
+  await page.reload();await page.getByLabel('Проект',{exact:true}).selectOption(empty.id);
+  await page.getByRole('button',{name:'Проверка и экспорт',exact:true}).click();
+  await panel.getByRole('status').filter({hasText:'Добавьте PDF-приложения, чтобы построить перечень.'}).waitFor();
+  assert(await panel.getByRole('button',{name:'Обновить перечень',exact:true}).isDisabled());
   assert.deepEqual(errors,[]);
-  fs.writeFileSync(path.join(output,'ui-report.json'),JSON.stringify({count:100,widths:[1440,760,390],customTitlePersisted:true,doubleClickGuard:true,keyboard:true,otherWindowStale:true,errorAndRetry:true,errors},null,2));
+  fs.writeFileSync(path.join(output,'ui-report.json'),JSON.stringify({count:100,widths:[1440,760,390],customTitlePersisted:true,doubleClickGuard:true,keyboard:true,emptyProjectExplained:true,otherWindowStale:true,errorAndRetry:true,errors},null,2));
  }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});
