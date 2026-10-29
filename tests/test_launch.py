@@ -20,8 +20,9 @@ class LaunchTests(TestCase):
                 self.send_response(200 if state['active'] else 404);self.end_headers()
                 self.wfile.write(json.dumps({'application':'bl-exhibit-manager','version':launch.__version__}).encode())
             def do_POST(self):
+                self.rfile.read(int(self.headers.get('Content-Length','0')))
                 state['header']=self.headers.get('X-Exhibit-Local');state['active']=False
-                self.send_response(200);self.end_headers();self.wfile.write(b'{}')
+                self.send_response(200);self.send_header('Content-Length','2');self.end_headers();self.wfile.write(b'{}')
         server=ThreadingHTTPServer(('127.0.0.1',0),Handler);thread=Thread(target=server.serve_forever,daemon=True);thread.start()
         try:
             with patch('ssl._create_default_https_context',side_effect=FileNotFoundError('unrelated HTTPS configuration')),patch.dict(os.environ,{'HTTP_PROXY':'http://127.0.0.1:1','NO_PROXY':''}):

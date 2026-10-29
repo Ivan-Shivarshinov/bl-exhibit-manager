@@ -1,5 +1,6 @@
 """File IRIs in Word and literal PDF Filespecs are different contracts."""
 import ctypes
+import sys
 from io import BytesIO
 from unittest import TestCase
 from urllib.parse import quote
@@ -84,9 +85,13 @@ class IndexLinkTests(TestCase):
                     size=raw.FPDFAction_GetFilePath(action,None,0)
                     buffer=ctypes.create_string_buffer(size)
                     self.assertEqual(raw.FPDFAction_GetFilePath(action,buffer,size),size)
-                    found.append(buffer.value.decode('utf-8').replace('\\','/'))
+                    found.append(buffer.value.decode('utf-8'))
             finally:page.close()
-        self.assertEqual(found,[path for path,_ in CASES])
+        # CPDF_FileSpec::DecodeFileName exposes classic Mac ':' on Apple,
+        # backslashes on Windows, and slashes elsewhere. Check native output
+        # exactly; only separators differ, never %, # or Unicode characters.
+        separator=':' if sys.platform=='darwin' else '\\' if sys.platform=='win32' else '/'
+        self.assertEqual(found,[path.replace('/',separator) for path,_ in CASES])
 
     def test_package_rejects_conflicting_pdf_filename_fields(self):
         data=index.generate('pdf',self.config,self.rows)
