@@ -16,6 +16,7 @@ from urllib.error import HTTPError
 from zipfile import ZipFile
 
 sys.path.insert(0,str(Path(__file__).resolve().parent.parent))
+from exhibit import __version__
 
 
 def main():
@@ -44,9 +45,9 @@ def main():
             if result.returncode:
                 log=data/'application.log'
                 raise AssertionError(result.stderr.decode(errors='replace')+'\n'+(log.read_text('utf-8',errors='replace') if log.exists() else 'No application log'))
-        def request(path,body=None,raw=None):
+        def request(path,body=None,raw=None,method=None):
             payload=json.dumps(body).encode() if body is not None else raw
-            req=Request(base+path,data=payload,headers={'X-Exhibit-Local':'1','Content-Type':'application/json'})
+            req=Request(base+path,data=payload,method=method,headers={'X-Exhibit-Local':'1','Content-Type':'application/json'})
             try:
                 with urlopen(req,timeout=30) as r:
                     content=r.read();return json.loads(content) if 'json' in r.headers.get('Content-Type','') else content
@@ -56,7 +57,7 @@ def main():
                 raise AssertionError(f'{path}: HTTP {exc.code}: '+exc.read().decode(errors='replace')+'\n'+(log.read_text('utf-8',errors='replace')[-16000:] if log.exists() else 'No server log')) from exc
         try:
             command('--no-browser')
-            health=request('/api/health');assert health['version']=='0.5.1'
+            health=request('/api/health');assert health['version']==__version__
             html=request('/').decode();assert 'root' in html
             for asset in re.findall(r'(?:src|href)="(/assets/[^\"]+)"',html):assert len(request(asset))>100
             assert request('/api/word/status')['configured'] is False
@@ -75,7 +76,7 @@ def main():
             assert b'BEGIN CERTIFICATE' in certificate and b'PRIVATE KEY' not in certificate
             context=ssl.create_default_context(cadata=certificate.decode())
             with urlopen(f'https://localhost:{tls_port}/api/health',context=context,timeout=5) as response:
-                assert json.load(response)['version']=='0.5.1'
+                assert json.load(response)['version']==__version__
             # Protocol smoke with an explicitly simulated Word host. This does
             # not claim Office.js validation in a real Word application.
             def panel(body):
@@ -160,7 +161,7 @@ def main():
             (data/pid/f'translation-{did}.json').write_text(json.dumps(draft),'utf-8')
             token=request(f'/api/projects/{pid}/backup',{})['token']
             saved=request(f'/api/backups/{token}/download')
-            target=archive.stem.split('0.5.1-')[-1]
+            target=archive.stem.split(__version__+'-')[-1]
             outgoing=Path('output/backup-exchange')/target;outgoing.mkdir(parents=True,exist_ok=True)
             (outgoing/'project.zip').write_bytes(saved)
             check=request('/api/backups/preview',raw=saved);assert check['conflict'] and check['summary']['exports']==3
@@ -189,6 +190,8 @@ def main():
                     env={**os.environ,'READY_QA_URL':base,'READY_QA_OUTPUT':str(ready_output.resolve())})
             from library_checks import verify as library_verify,load_check
             library_verify(request,data,outgoing,Path(sys.argv[2]) if len(sys.argv)>2 else Path('output/legacy-archives'))
+            from submission_index_checks import verify as index_verify
+            index_pid=index_verify(request,data,outgoing,source,Path(sys.argv[2]) if len(sys.argv)>2 else None)
             # Native builds already measure this exact package. The exchange host
             # deliberately has no source/build dependencies: exercise only its EXE/app.
             if len(sys.argv)==2:load_check(request,data,outgoing)
@@ -199,6 +202,9 @@ def main():
                 browser_env=os.environ.copy();browser_env['LIBRARY_QA_URL']=base;browser_env['LIBRARY_QA_OUTPUT']=str(outgoing.resolve())
                 subprocess.run(['node','scripts/library_ui.cjs'],env=browser_env,check=True,timeout=240)
                 subprocess.run(['node','scripts/library_review_ui.cjs'],env=browser_env,check=True,timeout=240)
+                # Select the index project explicitly; do not rely on catalog recency.
+                browser_env['INDEX_QA_URL']=base;browser_env['INDEX_QA_OUTPUT']=str(outgoing.resolve());browser_env['INDEX_QA_PID']=index_pid
+                subprocess.run(['node','scripts/submission_index_ui.cjs'],env=browser_env,check=True,timeout=240)
             before={str(p.relative_to(data)):p.read_bytes() for p in data.rglob('project.json')};assert before
             command('--stop');time.sleep(.3)
             # Move the application folder as an update/install-path change, retaining external data.
@@ -215,7 +221,7 @@ def main():
             log=data/'application.log'
             if log.exists():
                 time.sleep(.5)
-                evidence=Path('output/native-ready-qa')/archive.stem.split('0.5.1-')[-1]
+                evidence=Path('output/native-ready-qa')/archive.stem.split(__version__+'-')[-1]
                 evidence.mkdir(parents=True,exist_ok=True)
                 shutil.copyfile(log,evidence/'application-failure.log')
                 print(log.read_text('utf-8',errors='replace')[-16000:])

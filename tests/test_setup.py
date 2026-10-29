@@ -116,6 +116,9 @@ class SetupTests(TestCase):
             create.assert_called_once_with()
 
     def test_windows_same_subject_roots_verify_only_the_exact_trusted_certificate(self):
+        # A host may seed new contexts with an extra enterprise CA. Count only
+        # the roots this function adds, preserving the exact-certificate check.
+        initial_ca_count = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT).cert_store_stats()['x509_ca']
         @self.app.get('/api/health')
         def health(): return {'application':'bl-exhibit-manager'}
         word_setup.prepare(self.root, 8765, self.port)
@@ -130,7 +133,7 @@ class SetupTests(TestCase):
         try:
             with patch.object(word_setup.sys, 'platform', 'win32'), patch.object(ssl, 'enum_certificates', create=True, return_value=[entry(previous),entry(certificate)]):
                 context = word_setup.trust_context(certificate)
-                self.assertEqual(context.cert_store_stats()['x509_ca'], 1)
+                self.assertEqual(context.cert_store_stats()['x509_ca'], initial_ca_count + 1)
                 self.assertEqual(word_setup.status(self.root, self.app, True)['state'], 'trusted')
             with patch.object(word_setup.sys, 'platform', 'win32'), patch.object(ssl, 'enum_certificates', create=True, return_value=[entry(previous)]):
                 self.assertEqual(word_setup.status(self.root, self.app, True)['state'], 'needs_trust')

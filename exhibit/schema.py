@@ -2,7 +2,7 @@
 from copy import deepcopy
 from uuid import uuid4
 
-CURRENT = 2
+CURRENT = 3
 
 
 def provenance_schema(project):
@@ -10,7 +10,14 @@ def provenance_schema(project):
     return project
 
 
-UPGRADES = {1: provenance_schema}
+def index_schema(project):
+    from .index_settings import DEFAULT
+    project['schema'] = 3
+    project['submission_index'] = deepcopy(DEFAULT)
+    return project
+
+
+UPGRADES = {1: provenance_schema, 2: index_schema}
 
 
 def check_version(version):

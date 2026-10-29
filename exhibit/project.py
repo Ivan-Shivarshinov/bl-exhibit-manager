@@ -107,7 +107,10 @@ class Store:
         if not isinstance(p, dict) or p.get('id') != pid:
             raise ValueError('Идентификатор проекта не соответствует папке. Файлы не изменены.')
         from .schema import upgrade
-        return upgrade(self, p, target=p.get('schema'))
+        result = upgrade(self, p, target=p.get('schema'))
+        from .index_settings import settings
+        settings(result)
+        return result
 
     def save(self, p):
         folder = self.folder(p["id"])
@@ -538,7 +541,11 @@ class Store:
         if not status["ready"]: raise ValueError("Основной PDF ещё не подготовлен или устарел. Подготовьте его заново.")
         return (self.folder(p["id"]) / "main-pdf" / (status["key"]+".pdf")).read_bytes()
 
-    def export(self, p):
+    def export(self, p, preview_token=None):
+        from .index_settings import settings
+        if settings(p)['enabled']:
+            from .submission_index import manager
+            return manager(self).export(p['id'],preview_token)
         issues = self.validate(p)
         if issues:
             raise ValueError("Сборка заблокирована: " + issues[0]["message"])
@@ -559,6 +566,10 @@ class Store:
 
     def public(self, p):
         result = deepcopy(p)
+        from .index_settings import settings
+        from .submission_index import fingerprint
+        result['submission_index_settings'] = settings(p)
+        result['submission_index_fingerprint'] = fingerprint(p)
         for d in result["documents"]:
             d["identifier"] = identifier(d,p)
             d["ready"] = document_ready(p, d)

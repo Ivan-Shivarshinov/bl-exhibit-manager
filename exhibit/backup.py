@@ -60,6 +60,8 @@ def check_project(p, files, read):
     from .project import check_style, effective_format, identifier, document_ready
     if not isinstance(p, dict): fail('Некорректные настройки проекта.')
     check_version(p.get('schema'))
+    from .index_settings import settings
+    settings(p)
     if not re.fullmatch(ID, str(p.get('id', ''))) or not isinstance(p.get('name'), str) or not p['name'].strip():
         fail('Некорректное имя или идентификатор проекта.')
     if not isinstance(p.get('documents'), list) or not isinstance(p.get('references'), list) or not isinstance(p.get('style'), dict):

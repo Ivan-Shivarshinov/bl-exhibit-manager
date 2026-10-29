@@ -340,11 +340,45 @@ def result_pdf(pid: str, did: str):
 
 
 @app.post("/api/projects/{pid}/export")
-def export(pid: str):
+async def export(pid: str, request: Request):
+    raw = await request.body()
+    body = await request.json() if raw else {}
+    if not isinstance(body,dict): raise ValueError('Некорректные параметры сборки.')
     with LOCK:
         p = store.load(pid)
-    return Response(store.export(p), media_type="application/zip",
+    def build():
+        from .index_settings import settings
+        if settings(p)['enabled']: return store.export(p,body.get('preview_token'))
+        # Preserve serialization of the existing export path when the index is off.
+        with LOCK: return store.export(store.load(pid),body.get('preview_token'))
+    data = await run_in_threadpool(build)
+    return Response(data, media_type="application/zip",
                     headers={"Content-Disposition": 'attachment; filename="Submission.zip"'})
+
+
+@app.get('/api/projects/{pid}/submission-index')
+def get_index_settings(pid: str):
+    from .index_settings import settings
+    with LOCK: return settings(store.load(pid))
+
+
+@app.patch('/api/projects/{pid}/submission-index')
+async def save_index_settings(pid: str, request: Request):
+    from .index_settings import save
+    body = await request.json()
+    with LOCK: return store.public(save(store,store.load(pid),body))
+
+
+@app.get('/api/projects/{pid}/submission-index/status')
+def index_status(pid: str):
+    from .submission_index import fingerprint
+    with LOCK: return {'fingerprint':fingerprint(store.load(pid))}
+
+
+@app.post('/api/projects/{pid}/submission-index/preview')
+async def preview_index(pid: str):
+    from .submission_index import manager
+    return await run_in_threadpool(manager(store).preview,pid)
 
 
 @app.get("/api/projects/{pid}/main-pdf/status")

@@ -45,19 +45,29 @@ jobs:
         run: node --test scripts/library_loading_ui.cjs
       - run: node --test web/tests/*.test.js
       - run: python -m unittest discover -s tests -q
+      - name: Verify submission index browser flow and bounded load
+        run: python scripts/verify_submission_index.py --output output/submission-index-qa
       - name: Verify native local Word setup (simulated Word host)
         run: python scripts/verify_word_setup_native.py
       - run: python scripts/build_bundle.py
       - run: python scripts/generate_legacy_archives.py
-      - run: python scripts/bundle_smoke.py release/BLExhibitManager-0.5.1-${{ matrix.target }}.zip
+      - run: python scripts/bundle_smoke.py release/BLExhibitManager-0.6.0-${{ matrix.target }}.zip
         env:
           EXHIBIT_BROWSER_QA: '1'
+      - name: Verify update from released 0.5.1 and guarded rollback
+        run: python scripts/verify_index_upgrade.py release/BLExhibitManager-0.6.0-${{ matrix.target }}.zip --output output/submission-index-qa
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: pilot-${{ matrix.target }}
           path: release/*
           if-no-files-found: error
 
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: index-qa-${{ matrix.target }}
+          path: output/submission-index-qa
+          if-no-files-found: error
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: backup-${{ matrix.target }}
@@ -80,6 +90,9 @@ jobs:
       - name: Verify real LibreOffice conversion and full citation links
         if: runner.os == 'macOS'
         run: python scripts/verify_feedback_office.py --output output/feedback-office
+      - name: Render submission index in real LibreOffice
+        if: runner.os == 'macOS'
+        run: python scripts/verify_index_office.py --output output/feedback-office/submission-index
       - name: Verify retained web citations and mixed Word runs
         if: runner.os == 'macOS'
         run: python scripts/verify_reference_options_office.py --output output/feedback-office/reference-options
@@ -144,4 +157,4 @@ jobs:
           pattern: legacy-*
           path: incoming-backups/legacy
       - run: python -m pip install pypdf==6.10.0
-      - run: python scripts/bundle_smoke.py release/BLExhibitManager-0.5.1-${{ matrix.target }}.zip incoming-backups
+      - run: python scripts/bundle_smoke.py release/BLExhibitManager-0.6.0-${{ matrix.target }}.zip incoming-backups

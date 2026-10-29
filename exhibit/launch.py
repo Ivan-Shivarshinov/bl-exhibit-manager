@@ -34,14 +34,14 @@ def command(*args):
 
 def serve(port):
     import logging
-    import uvicorn
-    from .app import app
     from .project import ROOT
     ROOT.mkdir(parents=True,exist_ok=True)
     # Windowed executables can have no stderr, even when the parent redirects it.
     logging.basicConfig(filename=ROOT/"application.log",encoding="utf-8",
                         level=logging.WARNING,force=True,
                         format="%(asctime)s %(name)s %(levelname)s %(message)s")
+    import uvicorn
+    from .app import app
     server=uvicorn.Server(uvicorn.Config(app,host="127.0.0.1",port=port,access_log=False,log_level="warning",log_config=None))
     from .word_tls import start_optional as start_word
     app.state.http_port = port
@@ -152,6 +152,9 @@ def main():
             if sys.stdout:print(result)
         return 0
     except Exception as exc:
+        if args.serve:
+            import logging
+            logging.exception('Application server startup or execution failed')
         if not args.quiet:notify(str(exc),error=True)
         elif sys.stderr:print(str(exc),file=sys.stderr)
         return 1
