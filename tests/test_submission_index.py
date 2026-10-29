@@ -97,11 +97,15 @@ class IndexTests(TestCase):
             for d in self.p['documents']:self.assertEqual(z.read('Submission/'+d['filename']),self.s.source(self.p,d['original']))
 
     def test_final_pages_include_translation_and_selections(self):
-        p=self.s.create('Prepared');self.s.upload(p,'Annex 1.pdf',make_pdf('Original',[['One'],['Two'],['Three']]))
-        d=p['documents'][0];self.s.update(p,d['id'],{'number':1});self.s.upload(p,'Translation.pdf',make_pdf('Translated',[['One'],['Two']]),'translation',d['id'])
+        p=self.s.create('Prepared');self.s.upload(p,'Annex 1.pdf',make_pdf('Original',[['One'],['Excluded two'],['Three'],['Excluded four'],['Five']]))
+        d=p['documents'][0];self.s.update(p,d['id'],{'number':1,'selection':[{'page':1},{'page':3},{'page':5}]});self.s.upload(p,'Translation.pdf',make_pdf('Translated',[['One'],['Two']]),'translation',d['id'])
         self.s.approve(p,d['id'],'translation');self.s.approve(p,d['id'],'document')
         p=index_settings.save(self.s,p,{**deepcopy(index_settings.DEFAULT),'enabled':True})
-        self.assertEqual(self.m.preview(p['id'])['rows'][0]['pages'],5)
+        preview=self.m.preview(p['id']);self.assertEqual(preview['rows'][0]['pages'],5)
+        with ZipFile(BytesIO(self.s.export(p,preview['preview_token']))) as archive:
+            pages=PdfReader(BytesIO(archive.read('Submission/Annex 1.pdf'))).pages
+            self.assertEqual(len(pages),5)
+            self.assertTrue(all('Excluded' not in page.extract_text() for page in pages))
 
     def test_main_pdf_cache_is_independent_and_missing_converter_blocks_export(self):
         from tests import test_main_pdf as fixtures
