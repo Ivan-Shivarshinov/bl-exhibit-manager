@@ -48,6 +48,6 @@
 2. Есть единая актуальная база требований и сборки; известный повторяющийся отказ CI разобран с доказательствами.
 3. Для перечня зафиксированы состав, порядок, ссылки, отсутствие обязательного Office, совместимость архивов и критерии выдачи целого комплекта.
 
-Подробный план: [submission-exhibit-index](../openspec/changes/submission-exhibit-index/proposal.md), [задачи](../openspec/changes/submission-exhibit-index/tasks.md).
+Подробный план: [submission-exhibit-index](../openspec/changes/archive/2026-10-29-submission-exhibit-index/proposal.md), [задачи](../openspec/changes/archive/2026-10-29-submission-exhibit-index/tasks.md).
 
 Диагностика не содержит рабочих документов. Скачанный искусственный CI-пример хранится вне Git: `output/v060-readiness/intel-tag-failure/` (менее 2 МиБ). Новые копии проектов, LibreOffice и дистрибутивов не создавались.
