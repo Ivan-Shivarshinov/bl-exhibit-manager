@@ -34,6 +34,7 @@ class Desktop:
         self.u.SetProcessDPIAware()
         self.callback=C.WINFUNCTYPE(W.BOOL,W.HWND,W.LPARAM)
         self.u.EnumWindows.argtypes=[self.callback,W.LPARAM]
+        self.u.EnumChildWindows.argtypes=[W.HWND,self.callback,W.LPARAM]
         self.u.GetWindowThreadProcessId.argtypes=[W.HWND,C.POINTER(W.DWORD)]
         self.u.GetWindowTextW.argtypes=[W.HWND,W.LPWSTR,C.c_int]
         self.u.GetClassNameW.argtypes=[W.HWND,W.LPWSTR,C.c_int]
@@ -64,6 +65,14 @@ class Desktop:
         from PIL import ImageGrab
         rect=W.RECT();assert self.u.GetWindowRect(hwnd,C.byref(rect))
         return ImageGrab.grab(bbox=(rect.left,rect.top,rect.right,rect.bottom)),rect
+
+    def children(self,hwnd):
+        result=[]
+        @self.callback
+        def collect(child,unused):
+            text=C.create_unicode_buffer(2048);self.u.GetWindowTextW(child,text,len(text))
+            result.append({'hwnd':child,'text':text.value});return True
+        self.u.EnumChildWindows(hwnd,collect,0);return result
 
     def click(self,x,y):
         class Mouse(C.Structure):
@@ -157,10 +166,16 @@ def main():
                 desktop.capture(opened['hwnd'])[0].save(output/(label+'-target.png'))
                 desktop.u.PostMessageW(opened['hwnd'],0x111,217,0) # 3.6.1 CmdProperties
                 props=wait_for(lambda:next((w for w in desktop.windows(proc.pid) if w['class']=='SUMATRA_PDF_PROPERTIES'),None),'native document properties')
-                desktop.u.PostMessageW(props['hwnd'],0x111,234,0) # Copy the displayed properties, not test-side path inference.
-                expected=str((folder/target).resolve())
-                properties=wait_for(lambda:desktop.clipboard() if expected in desktop.clipboard() else None,'actual opened file path')
                 desktop.capture(props['hwnd'])[0].save(output/(label+'-properties.png'))
+                controls=desktop.children(props['hwnd'])
+                copy=next(c for c in controls if 'copy' in c['text'].lower())
+                desktop.u.PostMessageW(copy['hwnd'],0xF5,0,0) # BM_CLICK on the native Copy To Clipboard button.
+                expected=str((folder/target).resolve())
+                def copied():
+                    text=desktop.clipboard()
+                    (output/(label+'-clipboard.json')).write_text(json.dumps({'properties':text,'expected':expected,'controls':controls},ensure_ascii=False,indent=2),'utf-8')
+                    return text if expected.casefold() in text.replace('/','\\').casefold() else None
+                properties=wait_for(copied,'actual opened file path')
                 report['cases'].append({'location':location,'number':number,'path':expected,'title':opened['title'],'properties':properties,'passed':True})
                 print(json.dumps(report['cases'][-1],ensure_ascii=False),flush=True)
             finally:

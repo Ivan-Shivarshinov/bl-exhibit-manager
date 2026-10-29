@@ -190,4 +190,5 @@ jobs:
           path: |
             output/viewer-qa/*.png
             output/viewer-qa/report.json
+            output/viewer-qa/*-clipboard.json
           if-no-files-found: warn
