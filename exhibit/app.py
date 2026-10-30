@@ -4,7 +4,7 @@ from threading import RLock
 import logging
 from urllib.parse import urlparse
 from fastapi import FastAPI, Request, BackgroundTasks
-from fastapi.responses import JSONResponse, Response, FileResponse
+from fastapi.responses import JSONResponse, Response, FileResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from .project import Store, LOCK
@@ -15,6 +15,8 @@ from . import __version__
 from . import backup
 from starlette.concurrency import run_in_threadpool
 import shutil
+import re
+from .local_access import LocalAccess, audience, DENIED
 
 app = FastAPI(docs_url=None, redoc_url=None, openapi_url=None)
 from .word_connection import WordPanels
@@ -22,11 +24,114 @@ app.state.word_panels = WordPanels()
 app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost"])
 store = Store()
 translations = Translations(store)
+ACCESS_LOCK = RLock()
+
+
+def get_access():
+    with ACCESS_LOCK:
+        access = getattr(app.state, 'local_access', None)
+        if access is None or access.private.folder.parent != store.root:
+            access = app.state.local_access = LocalAccess(store.root)
+        return access
+
+
+def word_origin(request):
+    configured = getattr(app.state, 'word_connection', {})
+    origin = urlparse(configured.get('origin', ''))
+    return request.scope['scheme'] == 'https' and request.scope['server'][1] == origin.port and configured.get('configured') is True
+
+
+def word_scope(request):
+    path, method = request.url.path, request.method
+    return (method == 'GET' and (path == '/api/projects' or re.fullmatch(r'/api/word/projects/[a-f0-9]{32}', path))
+            or method == 'POST' and path in ('/api/word/connection', '/api/word/rewrite')
+            or method == 'POST' and re.fullmatch(r'/api/projects/[a-f0-9]{32}/upload', path)
+            and request.query_params.getlist('kind') == ['main'])
+
+
+async def access_body(request, keys):
+    data = bytearray()
+    async for part in request.stream():
+        data.extend(part)
+        if len(data) > 4096: raise ValueError('Слишком большой запрос доступа.')
+    import json
+    try: value = json.loads(data)
+    except (ValueError, UnicodeError) as exc: raise ValueError('Некорректный запрос доступа.') from exc
+    if not isinstance(value, dict) or set(value) != set(keys): raise ValueError('Некорректный запрос доступа.')
+    return value
 
 
 @app.get("/api/health")
-def health():
-    return {"application": "bl-exhibit-manager", "status": "ok", "version": __version__}
+def health(request: Request, challenge: str | None = None):
+    value = {"application": "bl-exhibit-manager", "status": "ok", "version": __version__}
+    if challenge is not None:
+        if not re.fullmatch('[a-f0-9]{64}', challenge): raise ValueError('Некорректная проверка экземпляра.')
+        access = get_access()
+        value.update(instance=access.instance, proof=access.proof(challenge, request.scope['server'][1]))
+    return value
+
+
+@app.post('/api/access/session')
+async def owner_session(request: Request):
+    data = await access_body(request, ('bootstrap',))
+    access, aud = get_access(), audience(request)
+    try: token = access.owner_session(data['bootstrap'], aud)
+    except ValueError: return JSONResponse({'detail': DENIED}, status_code=401)
+    return {'authorized': True, 'token': token}
+
+
+@app.get('/api/access/status')
+def access_status():
+    return {'authorized': True}
+
+
+@app.post('/api/access/word/request')
+async def request_word_access(request: Request):
+    await access_body(request, ())
+    if not word_origin(request): return JSONResponse({'detail': DENIED}, status_code=401)
+    return get_access().request_word(audience(request))
+
+
+@app.post('/api/access/word/poll')
+async def poll_word_access(request: Request):
+    data = await access_body(request, ('id', 'secret'))
+    if not word_origin(request): return JSONResponse({'detail': DENIED}, status_code=401)
+    try: return get_access().poll_word(data['id'], data['secret'], audience(request))
+    except ValueError: return JSONResponse({'detail': DENIED}, status_code=401)
+
+
+@app.post('/api/access/word/session')
+async def word_access_session(request: Request):
+    data = await access_body(request, ('grant',))
+    if not word_origin(request): return JSONResponse({'detail': DENIED}, status_code=401)
+    try: return {'token': get_access().word_session(data['grant'], audience(request))}
+    except ValueError: return JSONResponse({'detail': DENIED}, status_code=401)
+
+
+@app.get('/api/access/word/requests')
+def word_access_requests():
+    return get_access().requests()
+
+
+def revoke_word_access():
+    get_access().revoke_word()
+    app.state.word_panels.clear()
+
+
+@app.post('/api/access/word/revoke')
+async def revoke_word_permissions(request: Request):
+    data = await access_body(request, ('consent',))
+    if data['consent'] is not True: raise ValueError('Подтвердите отзыв разрешений панелей Word.')
+    revoke_word_access()
+    return {'revoked': True}
+
+
+@app.post('/api/access/word/{pid}/approve')
+async def approve_word_access(pid: str, request: Request):
+    data = await access_body(request, ('consent',))
+    if data['consent'] is not True: raise ValueError('Подтвердите совпадение кода в панели Word.')
+    get_access().approve_word(pid)
+    return {'approved': True}
 
 
 @app.post("/api/application/stop")
@@ -47,11 +152,35 @@ def stop_application(background: BackgroundTasks):
 
 @app.middleware("http")
 async def local_only(request: Request, call_next):
+    if request.headers.get('host', '').split(':')[0] not in ('localhost', '127.0.0.1'):
+        return JSONResponse({'detail': 'Недопустимый локальный адрес.'}, status_code=400)
+    if any(k in request.headers for k in ('forwarded', 'x-forwarded-for', 'x-forwarded-host', 'x-forwarded-proto', 'x-forwarded-port')):
+        return JSONResponse({'detail': 'Проксирование локального запроса не поддерживается.'}, status_code=403)
+    if request.scope['scheme'] == 'http' and not hasattr(app.state, 'http_port'):
+        app.state.http_port = request.scope['server'][1]
     origin = request.headers.get("origin")
     if origin and origin != str(request.base_url).rstrip("/"):
         return JSONResponse({"detail": "Запрос из другого источника запрещён."}, status_code=403)
     if request.method not in ("GET", "HEAD") and request.headers.get("X-Exhibit-Local") != "1":
         return JSONResponse({"detail": "Требуется локальный запрос интерфейса."}, status_code=403)
+    path = request.url.path
+    if request.scope['scheme'] == 'https' and request.method == 'GET' and (
+            path == '/' or re.fullmatch(r'/api/word/open/[a-f0-9]{32}/[a-f0-9]{32}/[a-f0-9]{32}', path)):
+        from urllib.parse import urlencode
+        query = '?' + urlencode({'open': path}) if path != '/' else ''
+        return RedirectResponse(f"http://127.0.0.1:{getattr(app.state, 'http_port', 8765)}/{query}", status_code=307)
+    public = path == '/api/health' and request.method in ('GET', 'HEAD') or request.method == 'POST' and path in (
+        '/api/access/session', '/api/access/word/request', '/api/access/word/poll', '/api/access/word/session')
+    if (path == '/api' or path.startswith('/api/')) and not public:
+        access, aud = get_access(), audience(request)
+        bearer = request.headers.get('authorization', '')
+        role = access.role(bearer[7:] if bearer.startswith('Bearer ') else None, aud)
+        if role is None or role == 'word' and (not word_origin(request) or not word_scope(request)):
+            if request.method == 'GET' and path.startswith('/api/word/open/'):
+                if re.fullmatch(r'/api/word/open/[a-f0-9]{32}/[a-f0-9]{32}/[a-f0-9]{32}', path):
+                    from urllib.parse import urlencode
+                    return RedirectResponse('/?' + urlencode({'open': path}), status_code=307)
+            return JSONResponse({'detail': DENIED}, status_code=401, headers={'Cache-Control': 'no-store'})
     try:
         response = await call_next(request)
     except Exception:
@@ -520,6 +649,7 @@ async def remove_word(request: Request):
     body = await request.json()
     if not isinstance(body, dict) or set(body) != {'consent'} or body['consent'] is not True: raise ValueError('Подтвердите удаление собственного подключения панели.')
     manager(app, store.root).begin(remove=True)
+    revoke_word_access()
     return await run_in_threadpool(status, store.root, app)
 
 

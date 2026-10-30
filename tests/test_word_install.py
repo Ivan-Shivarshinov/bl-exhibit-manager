@@ -8,7 +8,7 @@ from unittest.mock import patch
 from zipfile import ZipFile
 
 from fastapi import FastAPI
-from fastapi.testclient import TestClient
+from tests.api_client import TestClient
 from docx import Document
 from exhibit import word_setup, word_tls
 from exhibit.word_connection import WordPanels

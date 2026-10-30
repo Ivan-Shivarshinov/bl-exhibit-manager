@@ -9,6 +9,7 @@ from urllib.error import HTTPError
 from urllib.request import Request,urlopen,urlretrieve
 from zipfile import ZipFile
 from pypdf import PdfWriter
+sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 
 
 @contextmanager
@@ -30,9 +31,18 @@ def running(archive,root,data,slot):
         if result.returncode:
             log=data/'application.log'
             raise AssertionError(result.stderr.decode(errors='replace')+'\n'+(log.read_text('utf-8',errors='replace') if log.exists() else 'No application log'))
+    authorization={}
     def request(path,body=None,raw=None,method=None,expected=200):
+        nonlocal authorization
+        if not authorization:
+            base=f'http://127.0.0.1:{port}'
+            with urlopen(base+'/api/health',timeout=5) as response: version=json.load(response)['version']
+            if version=='0.5.1': authorization={'X-Exhibit-Local':'1'} # Explicit, hash-verified legacy package under test only.
+            else:
+                from exhibit.local_access import owner_headers
+                authorization=owner_headers(base,data)
         payload=json.dumps(body).encode() if body is not None else raw
-        req=Request(f'http://127.0.0.1:{port}'+path,data=payload,method=method,headers={'X-Exhibit-Local':'1','Content-Type':'application/json'})
+        req=Request(f'http://127.0.0.1:{port}'+path,data=payload,method=method,headers={**authorization,'Content-Type':'application/json'})
         try:
             with urlopen(req,timeout=60) as r:
                 value=r.read();assert expected==r.status

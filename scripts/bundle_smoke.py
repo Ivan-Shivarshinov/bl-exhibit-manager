@@ -17,6 +17,8 @@ from zipfile import ZipFile
 
 sys.path.insert(0,str(Path(__file__).resolve().parent.parent))
 from exhibit import __version__
+from exhibit.local_access import owner_headers
+from exhibit.launch import browser_entry
 
 
 def main():
@@ -40,14 +42,19 @@ def main():
         with socket.socket() as sock:sock.bind(('127.0.0.1',0));port=sock.getsockname()[1]
         base=f'http://127.0.0.1:{port}'
         flags={'creationflags':subprocess.CREATE_NO_WINDOW} if os.name=='nt' else {}
+        authorization={}
         def command(*args):
+            nonlocal authorization
             result=subprocess.run([str(exe),'--port',str(port),'--quiet',*args],cwd=cwd,env=env,capture_output=True,timeout=45,**flags)
             if result.returncode:
                 log=data/'application.log'
                 raise AssertionError(result.stderr.decode(errors='replace')+'\n'+(log.read_text('utf-8',errors='replace') if log.exists() else 'No application log'))
+            if '--no-browser' in args: authorization={}
         def request(path,body=None,raw=None,method=None):
+            nonlocal authorization
+            if not authorization: authorization=owner_headers(base,data)
             payload=json.dumps(body).encode() if body is not None else raw
-            req=Request(base+path,data=payload,method=method,headers={'X-Exhibit-Local':'1','Content-Type':'application/json'})
+            req=Request(base+path,data=payload,method=method,headers={**authorization,'Content-Type':'application/json'})
             try:
                 with urlopen(req,timeout=30) as r:
                     content=r.read();return json.loads(content) if 'json' in r.headers.get('Content-Type','') else content
@@ -79,9 +86,17 @@ def main():
                 assert json.load(response)['version']==__version__
             # Protocol smoke with an explicitly simulated Word host. This does
             # not claim Office.js validation in a real Word application.
+            word_base=f'https://localhost:{tls_port}'
+            def word_access(path,body):
+                req=Request(word_base+'/api/access/word/'+path,data=json.dumps(body).encode(),headers={'X-Exhibit-Local':'1','Content-Type':'application/json'})
+                with urlopen(req,context=context,timeout=5) as response:return json.load(response)
+            pending=word_access('request',{})
+            assert any(row['code']==pending['code'] for row in request('/api/access/word/requests'))
+            request('/api/access/word/'+pending['id']+'/approve',{'consent':True})
+            approved=word_access('poll',{k:pending[k] for k in ('id','secret')})
             def panel(body):
                 req=Request(f'https://localhost:{tls_port}/api/word/connection',data=json.dumps(body).encode(),
-                    headers={'X-Exhibit-Local':'1','Content-Type':'application/json'})
+                    headers={'X-Exhibit-Local':'1','Content-Type':'application/json','Authorization':'Bearer '+approved['token']})
                 with urlopen(req,context=context,timeout=5) as response:return json.load(response)
             # Technical preparation alone does not finish native installation.
             assert request('/api/setup')['components']['word']['panel']['state']=='setup_required'
@@ -183,11 +198,11 @@ def main():
             else:
                 from verify_ready_pdf import verify_api
                 ready_output=Path('output/native-ready-qa')/target
-                verify_api(base,ready_output)
+                verify_api(base,ready_output,authorization)
                 shutil.copy2(ready_output/'form-project.zip',outgoing/'ready-project.zip')
                 if (ready_output/'ready-library.zip').exists():shutil.copy2(ready_output/'ready-library.zip',outgoing/'ready-library.zip')
                 subprocess.run(['node','scripts/ready_pdf_ui.cjs'],check=True,timeout=240,
-                    env={**os.environ,'READY_QA_URL':base,'READY_QA_OUTPUT':str(ready_output.resolve())})
+                    env={**os.environ,'READY_QA_URL':base,'READY_QA_OUTPUT':str(ready_output.resolve()),'EXHIBIT_BROWSER_ENTRY':browser_entry(port,data)})
             from library_checks import verify as library_verify,load_check
             library_verify(request,data,outgoing,Path(sys.argv[2]) if len(sys.argv)>2 else Path('output/legacy-archives'))
             from submission_index_checks import verify as index_verify
@@ -200,10 +215,13 @@ def main():
                 fixtures=outgoing/'fixtures';fixtures.mkdir(exist_ok=True)
                 for i in range(100):(fixtures/f'Material {i:03d}.pdf').write_bytes(make_pdf(f'Fixture {i}',[[f'Distinct synthetic {i}']]))
                 browser_env=os.environ.copy();browser_env['LIBRARY_QA_URL']=base;browser_env['LIBRARY_QA_OUTPUT']=str(outgoing.resolve())
+                browser_env['EXHIBIT_BROWSER_ENTRY']=browser_entry(port,data)
                 subprocess.run(['node','scripts/library_ui.cjs'],env=browser_env,check=True,timeout=240)
+                browser_env['EXHIBIT_BROWSER_ENTRY']=browser_entry(port,data)
                 subprocess.run(['node','scripts/library_review_ui.cjs'],env=browser_env,check=True,timeout=240)
                 # Select the index project explicitly; do not rely on catalog recency.
                 browser_env['INDEX_QA_URL']=base;browser_env['INDEX_QA_OUTPUT']=str(outgoing.resolve());browser_env['INDEX_QA_PID']=index_pid
+                browser_env['EXHIBIT_BROWSER_ENTRY']=browser_entry(port,data)
                 subprocess.run(['node','scripts/submission_index_ui.cjs'],env=browser_env,check=True,timeout=240)
             before={str(p.relative_to(data)):p.read_bytes() for p in data.rglob('project.json')};assert before
             command('--stop');time.sleep(.3)

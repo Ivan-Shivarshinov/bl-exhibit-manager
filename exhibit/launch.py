@@ -8,7 +8,7 @@ import subprocess
 import sys
 import time
 import webbrowser
-from http.client import HTTPConnection, HTTPException
+from http.client import HTTPConnection
 
 from . import __version__
 
@@ -16,22 +16,28 @@ WORKSPACE = Path(__file__).resolve().parent.parent
 
 
 def health(port):
-    connection=HTTPConnection('127.0.0.1',port,timeout=2)
-    try:
-        # This is always a local HTTP probe. Do not initialize HTTPS handlers,
-        # certificate files or ambient proxy settings to contact our own listener.
-        connection.request('GET','/api/health')
-        response=connection.getresponse()
-        if response.status!=200:return None
-        info=json.loads(response.read(65536))
-        return info if isinstance(info,dict) and info.get('application')=='bl-exhibit-manager' else None
-    except (OSError,ValueError,HTTPException):
-        return None
-    finally:connection.close()
+    from .project import ROOT
+    from .local_access import instance_health
+    return instance_health(port, ROOT)
 
 
 def healthy(port):
     return health(port) is not None
+
+
+def browser_entry(port, root):
+    """Prepare the same private handoff for native launch and headless verification."""
+    from html import escape
+    from .local_access import credentials, instance_health, owner_bootstrap
+    info = instance_health(port, root)
+    if not info or info.get('version') != __version__: raise ValueError('Сервер завершил работу. Запустите приложение повторно.')
+    private, _ = credentials(root)
+    target = escape(f'http://127.0.0.1:{port}/#access=' + owner_bootstrap(root, port, info), quote=True)
+    path = private.write_browser(port, '<!doctype html><meta charset="utf-8"><meta name="referrer" content="no-referrer">'
+                                + f'<meta http-equiv="refresh" content="0;url={target}"><a href="{target}">Открыть BL Exhibit Manager</a>')
+    uri_path = str(path.resolve())
+    if uri_path.startswith('\\\\?\\'): uri_path = uri_path[4:]
+    return Path(uri_path).as_uri()
 
 
 def command(*args):
@@ -47,8 +53,9 @@ def serve(port):
                         level=logging.WARNING,force=True,
                         format="%(asctime)s %(name)s %(levelname)s %(message)s")
     import uvicorn
-    from .app import app
-    server=uvicorn.Server(uvicorn.Config(app,host="127.0.0.1",port=port,access_log=False,log_level="warning",log_config=None))
+    from .app import app, get_access
+    get_access()  # Fail closed before either listener is exposed.
+    server=uvicorn.Server(uvicorn.Config(app,host="127.0.0.1",port=port,access_log=False,log_level="warning",log_config=None,proxy_headers=False))
     from .word_tls import start_optional as start_word
     app.state.http_port = port
     word_server = start_word(app, ROOT, port)
@@ -71,9 +78,12 @@ def serve(port):
 
 def stop(port):
     if not healthy(port):return "Приложение уже остановлено."
+    from .project import ROOT
+    from .local_access import owner_headers
+    headers = owner_headers(f'http://127.0.0.1:{port}', ROOT)
     connection=HTTPConnection('127.0.0.1',port,timeout=5)
     try:
-        connection.request('POST','/api/application/stop',body=b'{}',headers={'X-Exhibit-Local':'1','Content-Type':'application/json'})
+        connection.request('POST','/api/application/stop',body=b'{}',headers={**headers,'Content-Type':'application/json'})
         response=connection.getresponse();body=response.read(65536)
         if response.status>=400:
             try:message=json.loads(body).get('detail','Не удалось остановить сервер.')
@@ -118,7 +128,11 @@ def launch(port,no_browser=False):
             process.terminate()
             raise ValueError(f"Сервер не ответил вовремя. Диагностика: {log}")
     url=f"http://127.0.0.1:{port}"
-    if not no_browser:webbrowser.open(url)
+    if not no_browser:
+        from .project import ROOT
+        from .browser_handoff import open_entry
+        # Browser command lines contain only an owner-private file path, never a credential.
+        open_entry(browser_entry(port, ROOT))
     return url
 
 

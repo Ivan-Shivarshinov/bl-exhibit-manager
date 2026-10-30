@@ -1,3 +1,4 @@
+const enterApp=require('./local_browser_access.cjs');
 // Browser plugin not available: real Chromium against an isolated synthetic server.
 const {chromium}=require('../web/node_modules/playwright');
 const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path');
@@ -7,7 +8,7 @@ const base=process.env.INDEX_QA_URL,output=process.env.INDEX_QA_OUTPUT;
  try{
   const page=await browser.newPage({viewport:{width:1440,height:1000}}),errors=[];
   page.on('pageerror',e=>errors.push(e.message));page.on('console',m=>{if(m.type()==='error'&&!(m.location().url.endsWith('/submission-index/preview')&&m.text().includes('400')))errors.push(m.text());});
-  await page.goto(base);assert.match(await page.title(),/Buzko Legal/);
+  await enterApp(page,base);assert.match(await page.title(),/Buzko Legal/);
   if(process.env.INDEX_QA_PID){
    await page.getByLabel('Проект',{exact:true}).selectOption(process.env.INDEX_QA_PID);
   }
@@ -36,9 +37,9 @@ const base=process.env.INDEX_QA_URL,output=process.env.INDEX_QA_OUTPUT;
   await page.waitForFunction(()=>document.querySelector('.index-table-scroll').scrollTop>0);
   // Another client changes the saved project while this window retains its preview.
   const headers={'X-Exhibit-Local':'1'};
-  const projects=await (await page.request.get(base+'/api/projects')).json();
-  const current=await (await page.request.get(base+'/api/projects/'+(process.env.INDEX_QA_PID||projects[0].id))).json();
-  const changed=await page.request.post(`${base}/api/projects/${current.id}/documents/${current.documents[0].id}`,{headers,data:{title:'Изменено в другом окне — synthetic'}});
+  const projects=await (await require('./local_browser_access.cjs').request(page,base).get(base+'/api/projects')).json();
+  const current=await (await require('./local_browser_access.cjs').request(page,base).get(base+'/api/projects/'+(process.env.INDEX_QA_PID||projects[0].id))).json();
+  const changed=await require('./local_browser_access.cjs').request(page,base).post(`${base}/api/projects/${current.id}/documents/${current.documents[0].id}`,{headers,data:{title:'Изменено в другом окне — synthetic'}});
   assert(changed.ok());
   await panel.getByRole('status').filter({hasText:'Перечень нужно обновить.'}).waitFor({timeout:10000});
   assert(await page.getByRole('button',{name:'Собрать подачу · ZIP',exact:true}).isDisabled());
@@ -59,8 +60,8 @@ const base=process.env.INDEX_QA_URL,output=process.env.INDEX_QA_OUTPUT;
   await page.reload();await page.getByRole('button',{name:'Проверка и экспорт',exact:true}).click();
   assert.equal(await panel.getByLabel('Заголовок перечня').inputValue(),custom);
   await page.keyboard.press('Tab');assert(await page.evaluate(()=>document.activeElement!==document.body));
-  const empty=await (await page.request.post(base+'/api/projects',{headers,data:{name:'Synthetic empty index'}})).json();
-  const enabled=await page.request.patch(`${base}/api/projects/${empty.id}/submission-index`,{headers,data:{...current.submission_index_settings,enabled:true}});assert(enabled.ok());
+  const empty=await (await require('./local_browser_access.cjs').request(page,base).post(base+'/api/projects',{headers,data:{name:'Synthetic empty index'}})).json();
+  const enabled=await require('./local_browser_access.cjs').request(page,base).patch(`${base}/api/projects/${empty.id}/submission-index`,{headers,data:{...current.submission_index_settings,enabled:true}});assert(enabled.ok());
   await page.reload();await page.getByLabel('Проект',{exact:true}).selectOption(empty.id);
   await page.getByRole('button',{name:'Проверка и экспорт',exact:true}).click();
   await panel.getByRole('status').filter({hasText:'Добавьте PDF-приложения, чтобы построить перечень.'}).waitFor();

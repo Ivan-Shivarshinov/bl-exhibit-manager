@@ -5,7 +5,7 @@ from io import BytesIO
 from pathlib import Path
 from zipfile import ZipFile
 from pypdf import PdfReader
-from fastapi.testclient import TestClient
+from tests.api_client import TestClient
 
 from exhibit.project import Store, effective_format, identifier, revision, review_digest
 from exhibit.samples import files, demo_project

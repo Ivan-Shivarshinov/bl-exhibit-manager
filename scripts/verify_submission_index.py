@@ -15,6 +15,8 @@ from exhibit.index_settings import DEFAULT
 from exhibit import index_documents
 from exhibit.project import Store
 from exhibit import index_settings, submission_index
+from exhibit.local_access import owner_headers
+from exhibit.launch import browser_entry
 
 
 def main():
@@ -24,7 +26,7 @@ def main():
         with socket.socket() as s:s.bind(('127.0.0.1',0));port=s.getsockname()[1]
         env={**os.environ,'EXHIBIT_DATA_DIR':data}
         with (out/'server.log').open('w',encoding='utf-8') as log:
-            proc=subprocess.Popen([sys.executable,'-m','uvicorn','exhibit.app:app','--host','127.0.0.1','--port',str(port)],cwd=ROOT,env=env,stdout=log,stderr=log)
+            proc=subprocess.Popen([sys.executable,'-m','uvicorn','exhibit.app:app','--host','127.0.0.1','--port',str(port),'--no-proxy-headers','--no-access-log'],cwd=ROOT,env=env,stdout=log,stderr=log,creationflags=subprocess.CREATE_NO_WINDOW if os.name=='nt' else 0)
             try:
                 base=f'http://127.0.0.1:{port}';client=httpx.Client(base_url=base,headers={'X-Exhibit-Local':'1'},timeout=120)
                 for _ in range(200):
@@ -33,6 +35,7 @@ def main():
                     except httpx.ConnectError:pass
                     time.sleep(.05)
                 else:raise RuntimeError('Synthetic server did not start')
+                client.headers.update(owner_headers(base,Path(data)))
                 def post(route,body):
                     r=client.post('/api'+route,json=body);r.raise_for_status();return r.json()
                 p=post('/projects',{'name':'Synthetic index QA'});pid=p['id']
@@ -50,7 +53,7 @@ def main():
                 with ZipFile(BytesIO(r.content)) as z:
                     for fmt in ('pdf','docx'):(out/('Exhibit index.'+fmt)).write_bytes(z.read('Submission/Exhibit index.'+fmt))
                 report={'count':preview['count'],'http_seconds':time.perf_counter()-started}
-                subprocess.run(['node',str(ROOT/'scripts/submission_index_ui.cjs')],cwd=ROOT,env={**os.environ,'INDEX_QA_URL':base,'INDEX_QA_OUTPUT':str(out)},check=True)
+                subprocess.run(['node',str(ROOT/'scripts/submission_index_ui.cjs')],cwd=ROOT,env={**os.environ,'INDEX_QA_URL':base,'INDEX_QA_OUTPUT':str(out),'EXHIBIT_BROWSER_ENTRY':browser_entry(port,Path(data))},check=True)
                 with TemporaryDirectory(prefix='bl-index-scale-') as scale_data:
                     store=Store(scale_data);large=store.create('500 synthetic entries')
                     raw=make_pdf('Example',[['Synthetic input']])

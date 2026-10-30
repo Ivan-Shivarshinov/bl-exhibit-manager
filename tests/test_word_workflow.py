@@ -6,7 +6,7 @@ from unittest import TestCase
 from unittest.mock import patch
 from zipfile import ZipFile, ZIP_DEFLATED
 from lxml import etree as E
-from fastapi.testclient import TestClient
+from tests.api_client import TestClient
 from exhibit import word, history, word_bridge
 from exhibit.project import Store, revision
 from exhibit.samples import make_pdf

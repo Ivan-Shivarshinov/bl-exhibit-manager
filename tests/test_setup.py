@@ -6,7 +6,7 @@ from tempfile import TemporaryDirectory
 from unittest import TestCase
 from unittest.mock import patch
 from fastapi import FastAPI
-from fastapi.testclient import TestClient
+from tests.api_client import TestClient
 from exhibit import diagnostics, word_setup, word_tls
 from exhibit.app import app, store
 
@@ -143,12 +143,14 @@ class SetupTests(TestCase):
     def test_summary_does_not_invoke_cli_or_mutate_files(self):
         with patch.object(store, 'root', self.root), patch.object(diagnostics.translation_cli, 'status') as cli:
             client = TestClient(app, base_url='http://localhost')
+            client.get('/api/access/status')  # Owner startup precedes read-only diagnostics.
+            before = {p: p.read_bytes() for p in self.root.rglob('*') if p.is_file()}
             response = client.get('/api/setup')
             self.assertEqual(response.status_code, 200)
             self.assertEqual(response.json()['components']['word']['state'], 'not_configured')
             self.assertEqual(response.json()['components']['claude']['state'], 'unchecked')
             cli.assert_not_called()
-        self.assertEqual(list(self.root.iterdir()), [])
+        self.assertEqual(before, {p: p.read_bytes() for p in self.root.rglob('*') if p.is_file()})
 
     def test_report_allowlist_rejects_private_data(self):
         secret = 'PRIVATE_DOCUMENT_NAME_PATH_TOKEN_KEY'

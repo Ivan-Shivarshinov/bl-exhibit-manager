@@ -2,7 +2,7 @@ from copy import deepcopy
 from tempfile import TemporaryDirectory
 from unittest import TestCase
 from unittest.mock import patch
-from fastapi.testclient import TestClient
+from tests.api_client import TestClient
 from exhibit.project import Store
 from exhibit import index_settings
 from exhibit.samples import make_pdf

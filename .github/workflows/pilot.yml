@@ -51,6 +51,8 @@ jobs:
         run: node --test scripts/library_loading_ui.cjs
       - run: node --test web/tests/*.test.js
       - run: python -m unittest discover -s tests -q
+      - name: Verify private launch and owner-approved Word access (headless, simulated Office)
+        run: python scripts/verify_local_access.py --output output/local-access-qa
       - name: Verify submission index browser flow and bounded load
         run: python scripts/verify_submission_index.py --output output/submission-index-qa
       - name: Verify native local Word setup (simulated Word host)
@@ -68,6 +70,12 @@ jobs:
           path: release/*
           if-no-files-found: error
 
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        if: always()
+        with:
+          name: access-qa-${{ matrix.target }}
+          path: output/local-access-qa
+          if-no-files-found: warn
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         if: always()
         with:
