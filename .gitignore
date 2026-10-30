@@ -5,6 +5,7 @@ __pycache__/
 node_modules/
 web/dist/
 data/
+.local-access/
 output/
 tmp/
 .env*

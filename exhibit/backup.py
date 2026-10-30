@@ -60,6 +60,8 @@ def check_project(p, files, read):
     from .project import check_style, effective_format, identifier, document_ready
     if not isinstance(p, dict): fail('Некорректные настройки проекта.')
     check_version(p.get('schema'))
+    from .index_settings import settings
+    settings(p)
     if not re.fullmatch(ID, str(p.get('id', ''))) or not isinstance(p.get('name'), str) or not p['name'].strip():
         fail('Некорректное имя или идентификатор проекта.')
     if not isinstance(p.get('documents'), list) or not isinstance(p.get('references'), list) or not isinstance(p.get('style'), dict):
@@ -77,6 +79,7 @@ def check_project(p, files, read):
         if not entry or entry['sha256'] != value.get('sha256') or value['blob'].split('.')[0] != entry['sha256']:
             fail('В архиве отсутствует или повреждён обязательный исходник.')
     source(p.get('main'))
+    pdf_info = {}
     for doc in p['documents']:
         if doc.get('provenance') is not None:
             from .library import uid, HASH, COPY_FIELDS
@@ -100,7 +103,11 @@ def check_project(p, files, read):
         for role in ('original', 'translation'):
             value = doc.get(role)
             if value:
-                meta = inspect_pdf(read('inputs/'+value['blob']), allow_forms=role=='original' and doc['mode']=='passthrough')
+                allow_forms = role == 'original' and doc['mode'] == 'passthrough'
+                key = (value['blob'], allow_forms)
+                if key not in pdf_info:
+                    pdf_info[key] = inspect_pdf(read('inputs/'+value['blob']), allow_forms=allow_forms)
+                meta = pdf_info[key]
                 if any(value.get(k) != meta[k] for k in ('pages','sizes')):
                     fail('Сведения о страницах исходного PDF не совпадают с файлом.')
     for ref in p['references']:

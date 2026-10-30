@@ -2,13 +2,47 @@ from unittest import TestCase
 from unittest.mock import patch,MagicMock
 import tempfile
 from pathlib import Path
-from fastapi.testclient import TestClient
+from tests.api_client import TestClient
 from exhibit import launch
 from exhibit.app import app, translations
 from exhibit import external_process
 
 
 class LaunchTests(TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory(); self.addCleanup(self.temp.cleanup)
+        self.root = Path(self.temp.name)
+        root = patch('exhibit.project.ROOT', self.root); root.start(); self.addCleanup(root.stop)
+
+    def test_loopback_health_and_stop_need_neither_https_context_nor_proxy(self):
+        from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
+        from threading import Thread
+        import json,os
+        from exhibit.local_access import LocalAccess
+        from urllib.parse import parse_qs,urlsplit
+        access=LocalAccess(self.root)
+        state={'active':True,'header':None}
+        class Handler(BaseHTTPRequestHandler):
+            def log_message(self,*args):pass
+            def do_GET(self):
+                self.send_response(200 if state['active'] else 404);self.end_headers()
+                challenge=parse_qs(urlsplit(self.path).query)['challenge'][0]
+                self.wfile.write(json.dumps({'application':'bl-exhibit-manager','version':launch.__version__,
+                    'instance':access.instance,'proof':access.proof(challenge,self.server.server_port)}).encode())
+            def do_POST(self):
+                body=json.loads(self.rfile.read(int(self.headers.get('Content-Length','0'))))
+                aud=f'http:{self.server.server_port}'
+                if self.path=='/api/access/session':data={'token':access.owner_session(body['bootstrap'],aud)}
+                else:
+                    assert access.role(self.headers['Authorization'][7:],aud)=='owner'
+                    state['header']=self.headers.get('X-Exhibit-Local');state['active']=False;data={}
+                content=json.dumps(data).encode();self.send_response(200);self.send_header('Content-Length',str(len(content)));self.end_headers();self.wfile.write(content)
+        server=ThreadingHTTPServer(('127.0.0.1',0),Handler);thread=Thread(target=server.serve_forever,daemon=True);thread.start()
+        try:
+            with patch('ssl._create_default_https_context',side_effect=FileNotFoundError('unrelated HTTPS configuration')),patch.dict(os.environ,{'HTTP_PROXY':'http://127.0.0.1:1','NO_PROXY':''}):
+                self.assertEqual(launch.health(server.server_port)['version'],launch.__version__)
+                self.assertIn('остановлено',launch.stop(server.server_port));self.assertEqual(state['header'],'1')
+        finally:server.shutdown();server.server_close();thread.join()
     def test_source_and_frozen_commands_are_distinct(self):
         with patch.object(launch.sys,'frozen',False,create=True):
             self.assertEqual(launch.command('--serve')[1:3],['-m','exhibit.launch'])

@@ -10,7 +10,7 @@ from zipfile import ZipFile
 from urllib.parse import unquote
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from fastapi.testclient import TestClient
+from tests.api_client import TestClient
 from pypdf import PdfReader
 from exhibit import app, main_pdf, word
 from exhibit.project import Store

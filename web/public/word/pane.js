@@ -1,12 +1,19 @@
 import {insertCitation, inspectUpdates, applyUpdates, currentDocx} from './office.js';
 import {startWordConnection} from './connection.js';
+import {WordAccess} from './access.js';
 
 const $ = id => document.getElementById(id);
-let catalog = null, selected = '', plan = null, busy = false;
+let catalog = null, selected = '', plan = null, busy = false, workspaceReady = false;
 const messages = {current:'Актуальна', update:'Можно обновить', manual:'Текст исправлен вручную — проверьте в Word', missing:'Приложение отсутствует в подаче', other_project:'Ссылка из другой подачи'};
+const access = new WordAccess({onPairing:code=>{
+  $('access').hidden=!code;$('access-code').textContent=code||'';
+  if(code){$('workspace').hidden=true;$('status').textContent='Подтвердите код панели в приложении.';}
+  else if(workspaceReady)$('workspace').hidden=false;
+}});
+$('access-retry').onclick=()=>location.reload();
 
 async function api(path, body, binary=false, headers={}) {
-  const response = await fetch('/api'+path, {method: body === undefined ? 'GET' : 'POST', headers: {'X-Exhibit-Local':'1', ...(binary ? {} : {'Content-Type':'application/json'}), ...headers}, body: body === undefined ? undefined : binary ? body : JSON.stringify(body)});
+  const response = await access.fetch('/api'+path, {method: body === undefined ? 'GET' : 'POST', headers: {'X-Exhibit-Local':'1', ...(binary ? {} : {'Content-Type':'application/json'}), ...headers}, body: body === undefined ? undefined : binary ? body : JSON.stringify(body)});
   if (!response.ok) { let result; try { result=await response.json(); } catch {} throw new Error(result?.detail || `Ошибка ${response.status}`); }
   return response.json();
 }
@@ -76,7 +83,7 @@ for(const [id,existing] of [['insert',false],['append',true]])$(id).onclick=()=>
 $('check').onclick=()=>run(async()=>{catalog=await api('/word/projects/'+catalog.id);plan=await inspectUpdates(catalog);showPlan();});
 $('apply').onclick=()=>run(async()=>{
   const fresh=await api('/word/projects/'+catalog.id),indices=[...$('updates').querySelectorAll('input:checked')].map(i=>Number(i.value));
-  const count=await applyUpdates(fresh,plan,indices);catalog=fresh;clearPlan();$('status').textContent=`Обновлено ссылок: ${count}. Сохраните Word.`;
+  const count=await applyUpdates(fresh,plan,indices,{fetch:access.fetch.bind(access)});catalog=fresh;clearPlan();$('status').textContent=`Обновлено ссылок: ${count}. Сохраните Word.`;
 });
 $('send').onclick=()=>run(async()=>{
   const docx=await currentDocx();
@@ -93,12 +100,14 @@ else Office.onReady(async info=>{
   const supported=Office.context.requirements.isSetSupported('WordApi','1.5');
   if(!supported) $('status').textContent='Нужен Word с поддержкой WordApi 1.5, например Microsoft 365 или Office 2024. Проверьте доступные обновления вашей редакции Word.';
   try {
+    await access.authorize();
     const stop=await startWordConnection(info, {
+      fetch:access.fetch.bind(access),
       onError:message=>{$('connection-error').textContent=message;$('connection-error').hidden=false;},
-      onReady:()=>{$('connection-error').hidden=true;},
+      onReady:()=>{$('connection-error').hidden=true;if(supported)$('workspace').hidden=false;},
     });
     window.addEventListener('pagehide', stop, {once:true});
-  } catch { $('status').textContent='Word не подтвердил готовность панели. Закройте и снова откройте панель; обычная работа в приложении доступна.';return; }
+  } catch(error) { $('status').textContent=error.message||'Word не подтвердил готовность панели. Повторите подключение; обычная работа в приложении доступна.';$('access').hidden=false;return; }
   if(!supported)return;
-  $('workspace').hidden=false;$('status').textContent='Подключено к Word. Выберите подачу.';run(refresh);
+  workspaceReady=true;$('workspace').hidden=false;$('status').textContent='Подключено к Word. Выберите подачу.';run(refresh);
 });

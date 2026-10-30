@@ -62,3 +62,15 @@ a:not(.button){color:var(--link)}
 .error-note{color:var(--danger);background:var(--danger-bg)}
 .warning,.translation-state{color:var(--warning);background:var(--warning-bg)}
 .translation-state.ready{color:var(--success);background:var(--success-bg)}
+.submission-index{margin:24px 0;padding:20px;border:1px solid var(--line);border-radius:8px;min-width:0}
+.submission-index fieldset{border:0;padding:0;min-width:0}.submission-index legend{font-weight:600;margin-bottom:8px}
+.index-settings{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px;margin:20px 0}
+.submission-index .index-check{display:flex;align-items:center;gap:10px;margin:10px 0;line-height:1.5}
+.submission-index .index-check input{width:auto;flex:0 0 auto}
+.index-table-scroll{max-height:420px;overflow:auto;margin-top:16px;border:1px solid var(--line)}
+.index-table-scroll table{width:100%;min-width:620px;border-collapse:collapse;table-layout:fixed}
+.index-table-scroll th,.index-table-scroll td{padding:10px;vertical-align:top;overflow-wrap:anywhere;text-align:left;border-bottom:1px solid var(--line)}
+.index-table-scroll th{position:sticky;top:0;background:var(--canvas)}
+.index-table-scroll caption{padding:12px;text-align:left;overflow-wrap:anywhere}
+.index-stale{opacity:.65}.submission-index .warning{padding:12px}
+@media(max-width:650px){.index-settings{grid-template-columns:1fr}.submission-index{padding:14px}.submission-index .actions{flex-direction:column;align-items:stretch}}

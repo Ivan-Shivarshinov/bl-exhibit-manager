@@ -6,7 +6,7 @@ from tempfile import TemporaryDirectory
 from unittest import TestCase
 from unittest.mock import patch
 from fastapi import FastAPI
-from fastapi.testclient import TestClient
+from tests.api_client import TestClient
 from exhibit import diagnostics, word_setup, word_tls
 from exhibit.app import app, store
 
@@ -116,6 +116,9 @@ class SetupTests(TestCase):
             create.assert_called_once_with()
 
     def test_windows_same_subject_roots_verify_only_the_exact_trusted_certificate(self):
+        # A host may seed new contexts with an extra enterprise CA. Count only
+        # the roots this function adds, preserving the exact-certificate check.
+        initial_ca_count = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT).cert_store_stats()['x509_ca']
         @self.app.get('/api/health')
         def health(): return {'application':'bl-exhibit-manager'}
         word_setup.prepare(self.root, 8765, self.port)
@@ -130,7 +133,7 @@ class SetupTests(TestCase):
         try:
             with patch.object(word_setup.sys, 'platform', 'win32'), patch.object(ssl, 'enum_certificates', create=True, return_value=[entry(previous),entry(certificate)]):
                 context = word_setup.trust_context(certificate)
-                self.assertEqual(context.cert_store_stats()['x509_ca'], 1)
+                self.assertEqual(context.cert_store_stats()['x509_ca'], initial_ca_count + 1)
                 self.assertEqual(word_setup.status(self.root, self.app, True)['state'], 'trusted')
             with patch.object(word_setup.sys, 'platform', 'win32'), patch.object(ssl, 'enum_certificates', create=True, return_value=[entry(previous)]):
                 self.assertEqual(word_setup.status(self.root, self.app, True)['state'], 'needs_trust')
@@ -140,12 +143,14 @@ class SetupTests(TestCase):
     def test_summary_does_not_invoke_cli_or_mutate_files(self):
         with patch.object(store, 'root', self.root), patch.object(diagnostics.translation_cli, 'status') as cli:
             client = TestClient(app, base_url='http://localhost')
+            client.get('/api/access/status')  # Owner startup precedes read-only diagnostics.
+            before = {p: p.read_bytes() for p in self.root.rglob('*') if p.is_file()}
             response = client.get('/api/setup')
             self.assertEqual(response.status_code, 200)
             self.assertEqual(response.json()['components']['word']['state'], 'not_configured')
             self.assertEqual(response.json()['components']['claude']['state'], 'unchecked')
             cli.assert_not_called()
-        self.assertEqual(list(self.root.iterdir()), [])
+        self.assertEqual(before, {p: p.read_bytes() for p in self.root.rglob('*') if p.is_file()})
 
     def test_report_allowlist_rejects_private_data(self):
         secret = 'PRIVATE_DOCUMENT_NAME_PATH_TOKEN_KEY'

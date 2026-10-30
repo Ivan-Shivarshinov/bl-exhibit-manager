@@ -1,3 +1,4 @@
+const enterApp=require('./local_browser_access.cjs');
 // Real browser interactions against an isolated profile and synthetic fixtures.
 const {chromium}=require('../web/node_modules/playwright');
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
@@ -10,10 +11,10 @@ assert(base&&dir,'Set isolated READY_QA_URL and READY_QA_OUTPUT');
   page.on('pageerror',e=>errors.push(e.message));
   page.on('console',msg=>{if(msg.type()==='error')errors.push(msg.text());});
   const request=async(route,body)=>{
-   const response=await page.request.fetch(base+'/api'+route,{method:body===undefined?'GET':'POST',headers:{'X-Exhibit-Local':'1'},...(body===undefined?{}:{data:body})});
+   const response=await require('./local_browser_access.cjs').request(page,base).fetch(base+'/api'+route,{method:body===undefined?'GET':'POST',headers:{'X-Exhibit-Local':'1'},...(body===undefined?{}:{data:body})});
    assert(response.ok(),`${route}: ${await response.text()}`);return response.json();
   };
-  await page.goto(base);await page.getByLabel('Проект',{exact:true}).locator('option').first().waitFor({state:'attached'});
+  await enterApp(page,base);await page.getByLabel('Проект',{exact:true}).locator('option').first().waitFor({state:'attached'});
   assert.match(await page.locator('.brand').textContent(),/Buzko Legal/);
   assert.equal(await page.locator('vite-error-overlay').count(),0);
   const seeded=JSON.parse(fs.readFileSync(path.join(dir,'ready-api-report.json'))),pid=seeded.pid;

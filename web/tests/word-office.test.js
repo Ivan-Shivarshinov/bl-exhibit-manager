@@ -88,6 +88,17 @@ test('successful updates apply prepared source formatting in reverse document or
   assert.deepEqual(writes,[{i:1,xml:'preserved typography'},{i:0,xml:'preserved typography'}]);
 });
 
+test('citation rewrite uses the authenticated fetch supplied by the pane',async()=>{
+  const {writes}=updateHost();const plan=await inspectUpdates(catalog);let calls=0;
+  globalThis.fetch=()=>assert.fail('Raw fetch would omit the Word authorization');
+  const authenticated=async(path,options)=>{
+    calls++;assert.equal(path,'/api/word/rewrite');assert.equal(options.headers['X-Exhibit-Local'],'1');
+    return {ok:true,json:async()=>({ooxml:'authorized typography'})};
+  };
+  assert.equal(await applyUpdates(catalog,plan,[0],{fetch:authenticated}),1);
+  assert.equal(calls,1);assert.equal(writes[0].xml,'authorized typography');
+});
+
 test('restored project updates tolerate regenerated Word IDs without changing order or prepared typography',async()=>{
   const {writes,state,ranges}=updateHost();
   const copy={...catalog,id:'c'.repeat(32),restored_bindings:ranges.map(range=>({
