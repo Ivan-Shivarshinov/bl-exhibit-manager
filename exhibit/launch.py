@@ -7,9 +7,8 @@ import socket
 import subprocess
 import sys
 import time
-from urllib.error import URLError, HTTPError
-from urllib.request import Request, urlopen
 import webbrowser
+from http.client import HTTPConnection
 
 from . import __version__
 
@@ -17,15 +16,28 @@ WORKSPACE = Path(__file__).resolve().parent.parent
 
 
 def health(port):
-    try:
-        with urlopen(f"http://127.0.0.1:{port}/api/health",timeout=2) as response:
-            info=json.load(response)
-            return info if info.get("application")=="bl-exhibit-manager" else None
-    except (URLError,OSError,ValueError):return None
+    from .project import ROOT
+    from .local_access import instance_health
+    return instance_health(port, ROOT)
 
 
 def healthy(port):
     return health(port) is not None
+
+
+def browser_entry(port, root):
+    """Prepare the same private handoff for native launch and headless verification."""
+    from html import escape
+    from .local_access import credentials, instance_health, owner_bootstrap
+    info = instance_health(port, root)
+    if not info or info.get('version') != __version__: raise ValueError('Сервер завершил работу. Запустите приложение повторно.')
+    private, _ = credentials(root)
+    target = escape(f'http://127.0.0.1:{port}/#access=' + owner_bootstrap(root, port, info), quote=True)
+    path = private.write_browser(port, '<!doctype html><meta charset="utf-8"><meta name="referrer" content="no-referrer">'
+                                + f'<meta http-equiv="refresh" content="0;url={target}"><a href="{target}">Открыть BL Exhibit Manager</a>')
+    uri_path = str(path.resolve())
+    if uri_path.startswith('\\\\?\\'): uri_path = uri_path[4:]
+    return Path(uri_path).as_uri()
 
 
 def command(*args):
@@ -34,15 +46,16 @@ def command(*args):
 
 def serve(port):
     import logging
-    import uvicorn
-    from .app import app
     from .project import ROOT
     ROOT.mkdir(parents=True,exist_ok=True)
     # Windowed executables can have no stderr, even when the parent redirects it.
     logging.basicConfig(filename=ROOT/"application.log",encoding="utf-8",
                         level=logging.WARNING,force=True,
                         format="%(asctime)s %(name)s %(levelname)s %(message)s")
-    server=uvicorn.Server(uvicorn.Config(app,host="127.0.0.1",port=port,access_log=False,log_level="warning",log_config=None))
+    import uvicorn
+    from .app import app, get_access
+    get_access()  # Fail closed before either listener is exposed.
+    server=uvicorn.Server(uvicorn.Config(app,host="127.0.0.1",port=port,access_log=False,log_level="warning",log_config=None,proxy_headers=False))
     from .word_tls import start_optional as start_word
     app.state.http_port = port
     word_server = start_word(app, ROOT, port)
@@ -65,14 +78,18 @@ def serve(port):
 
 def stop(port):
     if not healthy(port):return "Приложение уже остановлено."
-    request=Request(f"http://127.0.0.1:{port}/api/application/stop",data=b"{}",
-                    headers={"X-Exhibit-Local":"1","Content-Type":"application/json"},method="POST")
+    from .project import ROOT
+    from .local_access import owner_headers
+    headers = owner_headers(f'http://127.0.0.1:{port}', ROOT)
+    connection=HTTPConnection('127.0.0.1',port,timeout=5)
     try:
-        with urlopen(request,timeout=5) as response:json.load(response)
-    except HTTPError as exc:
-        try:message=json.load(exc).get("detail","Не удалось остановить сервер.")
-        except (ValueError,AttributeError):message="Не удалось остановить сервер."
-        raise ValueError(message) from exc
+        connection.request('POST','/api/application/stop',body=b'{}',headers={**headers,'Content-Type':'application/json'})
+        response=connection.getresponse();body=response.read(65536)
+        if response.status>=400:
+            try:message=json.loads(body).get('detail','Не удалось остановить сервер.')
+            except (ValueError,AttributeError):message='Не удалось остановить сервер.'
+            raise ValueError(message)
+    finally:connection.close()
     for _ in range(60):
         if not healthy(port):return "Приложение остановлено. Проекты сохранены."
         time.sleep(.25)
@@ -111,7 +128,11 @@ def launch(port,no_browser=False):
             process.terminate()
             raise ValueError(f"Сервер не ответил вовремя. Диагностика: {log}")
     url=f"http://127.0.0.1:{port}"
-    if not no_browser:webbrowser.open(url)
+    if not no_browser:
+        from .project import ROOT
+        from .browser_handoff import open_entry
+        # Browser command lines contain only an owner-private file path, never a credential.
+        open_entry(browser_entry(port, ROOT))
     return url
 
 
@@ -152,6 +173,9 @@ def main():
             if sys.stdout:print(result)
         return 0
     except Exception as exc:
+        if args.serve:
+            import logging
+            logging.exception('Application server startup or execution failed')
         if not args.quiet:notify(str(exc),error=True)
         elif sys.stderr:print(str(exc),file=sys.stderr)
         return 1

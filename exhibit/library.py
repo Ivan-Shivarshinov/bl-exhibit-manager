@@ -474,7 +474,7 @@ class Library:
                         shutil.copyfile(self.folder(prov['library_id'])/'blobs'/source['blob'],folder/source['blob'])
             if cancel(): raise ValueError('Добавление отменено; подача сохранена.')
             from .schema import upgrade
-            p = upgrade(self.store,p,target=2,persist=False)
+            p = upgrade(self.store,p,target=max(2,p['schema']),persist=False)
             proposed = deepcopy(p)
             inputs = self.store.folder(p['id'])/'inputs'; inputs.mkdir(exist_ok=True)
             for d in plan['documents']:

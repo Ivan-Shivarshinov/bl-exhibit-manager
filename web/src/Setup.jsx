@@ -1,3 +1,4 @@
+import {PrivateLink} from './PrivateResources';
 import React, {useEffect, useRef, useState} from 'react';
 
 const labels={available:'Доступен',missing:'Не установлен',needs_login:'Нужен вход',error:'Проверьте настройку',unchecked:'Не проверен',not_configured:'Не подключена',stopped:'Остановлено',running:'HTTPS запущен',trusted:'HTTPS проверен',needs_trust:'Проверьте доверие'};
@@ -7,13 +8,15 @@ export function WordSetup({api}) {
   const [downloadState,setDownloadState]=useState(null);
   const [refreshError,setRefreshError]=useState('');
   const [confirmation,setConfirmation]=useState('');
+  const [requests,setRequests]=useState([]);
+  const [permissionMessage,setPermissionMessage]=useState('');
   const refreshVersion=useRef(0);
   const actionPending=useRef(false);
   useEffect(()=>{
     let live=true,timer,delay=1000;
     async function refresh() {
       const version=refreshVersion.current;
-      try {if(actionPending.current)return;const s=await api('/setup');if(live&&version===refreshVersion.current){setStatus(s.components.word);setRefreshError('');delay=s.components.word.installation?.busy?1000:5000;}}
+      try {if(actionPending.current)return;const [s,requests]=await Promise.all([api('/setup'),api('/access/word/requests')]);if(live&&version===refreshVersion.current){setStatus(s.components.word);setRequests(requests);setRefreshError('');delay=s.components.word.installation?.busy?1000:2000;}}
       catch(e){if(live&&version===refreshVersion.current){setRefreshError(e.message);setStatus(null);}}
       finally {if(live)timer=setTimeout(refresh,delay);}
     }
@@ -37,6 +40,14 @@ export function WordSetup({api}) {
     } catch(e){setDownloadState({path,state:'error',message:'Не удалось скачать файл. '+e.message+' Повторите скачивание.'});}
     finally{setBusy('');}
   }
+  async function permission(id=null) {
+    refreshVersion.current++;actionPending.current=true;setBusy('Обновляем разрешения панели…');setError('');setPermissionMessage('');
+    try {
+      await api('/access/word/'+(id?id+'/approve':'revoke'),{consent:true});
+      setRequests(rows=>id?rows.filter(row=>row.id!==id):[]);
+      setPermissionMessage(id?'Код подтверждён. Ожидаем ответа панели Word.':'Разрешения панелей отозваны. Для нового доступа подтвердите новый код. Документы и настройка сертификата сохранены.');
+    }catch(e){setError(e.message);}finally{setBusy('');actionPending.current=false;refreshVersion.current++;}
+  }
   function downloadControl(path,filename,label) {
     const current=downloadState?.path===path?downloadState:null;
     return <><p><button disabled={!!busy||!!status?.installation?.busy} aria-busy={current?.state==='loading'} onClick={()=>download(path,filename)}>{current?.state==='loading'?'Скачиваем…':label}</button></p>
@@ -48,6 +59,9 @@ export function WordSetup({api}) {
   return <section className="setup-card"><h2>Панель Word · по желанию</h2>
     <p>Создавайте сноски прямо в Word. Обычная загрузка DOCX/PDF и сборка комплекта доступны без панели.</p>
     <p className="muted">Экспериментальное локальное подключение для пилота.</p>
+    {requests.length>0&&<div className="setup-consent"><h3>Запрос доступа из панели</h3><p>Сравните код с открытой вами панелью Word. Разрешайте только совпадающий код.</p>{requests.map(request=><p key={request.id}><strong>{request.code}</strong>{' '}<button disabled={blocked} onClick={()=>permission(request.id)}>Разрешить код {request.code}</button></p>)}</div>}
+    {permissionMessage&&<p role="status">{permissionMessage}</p>}
+    {status?.origin&&<p><button disabled={blocked} onClick={()=>permission()}>Отозвать разрешения панелей</button></p>}
     {error&&<p role="alert" className="error-note">{error}</p>}
     {refreshError&&<p role="alert" className="error-note">Связь с приложением потеряна. {refreshError} Проверяем повторно…</p>}
     <p role={installation?.phase==='error'?'alert':'status'}>{busy||installationMessage||'Проверяем настройки…'}</p>
@@ -77,7 +91,7 @@ export function WordSetup({api}) {
         {!status?.origin&&<><label className="field">HTTPS-порт (необязательно)<input type="number" min="1024" max="65535" value={port} onChange={e=>setPort(e.target.value)}/></label><button disabled={blocked} onClick={()=>action('/setup/word',port?{port:Number(port)}:{})}>Подготовить технические файлы</button></>}
         {status?.origin&&<>{status.generated&&downloadControl('/setup/word/certificate','BL-Exhibit-localhost.crt','Скачать сертификат')}{downloadControl('/word/manifest','BLExhibitManager.Word.xml','Скачать манифест Word')}</>}
       </details>
-      <a className="button" href="/api/word/instructions" target="_blank" rel="noopener">Инструкция по подключению</a>
+      <PrivateLink className="button" href="/api/word/instructions" target="_blank" rel="noopener">Инструкция по подключению</PrivateLink>
     </details>
   </section>;
 }

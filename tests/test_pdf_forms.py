@@ -7,7 +7,7 @@ from unittest.mock import patch
 from zipfile import ZipFile
 from PIL import Image
 from pypdf import PdfReader, PdfWriter
-from fastapi.testclient import TestClient
+from tests.api_client import TestClient
 
 from exhibit import pdf, backup, word
 from exhibit.project import Store, DEFAULT_STYLE

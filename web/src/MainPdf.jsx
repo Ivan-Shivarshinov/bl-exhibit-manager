@@ -1,3 +1,5 @@
+import {ownerFetch} from './access';
+import {PrivateLink} from './PrivateResources';
 import React, {useEffect, useState} from 'react';
 
 export default function MainPdf({p, api, run, disabled, onSetup}) {
@@ -6,7 +8,7 @@ export default function MainPdf({p, api, run, disabled, onSetup}) {
   useEffect(()=>{
     if(!status?.ready){setImage('');return;}
     const controller=new AbortController();let url,live=true;setImage('');setError('');
-    fetch(`/api/projects/${p.id}/main-pdf/preview?page=${page}&v=${status.key}`,{signal:controller.signal}).then(async r=>{if(!r.ok){const d=await r.json();throw new Error(d.detail);}return r.blob();}).then(b=>{if(live){url=URL.createObjectURL(b);setImage(url);}}).catch(e=>{if(live&&e.name!=='AbortError')setError(e.message);});
+    ownerFetch(`/api/projects/${p.id}/main-pdf/preview?page=${page}&v=${status.key}`,{signal:controller.signal}).then(async r=>{if(!r.ok){const d=await r.json();throw new Error(d.detail);}return r.blob();}).then(b=>{if(live){url=URL.createObjectURL(b);setImage(url);}}).catch(e=>{if(live&&e.name!=='AbortError')setError(e.message);});
     return()=>{live=false;controller.abort();if(url)URL.revokeObjectURL(url);};
   },[p.id,status,page]);
   return <section className="main-pdf"><h2>Основной PDF</h2><button onClick={onSetup}>Проверить конвертер и настройку</button><p className="muted">{status?.ready?`Подготовлен через ${status.converted_with}. Страниц: ${status.pages}.`:status?.available?`Локальная конвертация: ${status.label}.`:status?.message||'Проверяем конвертер…'}</p>
@@ -17,6 +19,6 @@ export default function MainPdf({p, api, run, disabled, onSetup}) {
     <p className="muted">Сверьте переносы страниц и сноски. В ZIP войдут DOCX и PDF. Ссылки PDF открывают приложения из распакованной папки; переходы проверьте в desktop PDF-просмотрщике. Предпросмотр ниже показывает вёрстку.</p>
     <details><summary>Если подпись отрывается от имени</summary><p>В исходном Word выделите абзацы блока подписи до последнего. Откройте «Абзац» → «Положение на странице» и включите «Не отрывать от следующего». Якорь картинки должен находиться внутри блока. Сохраните DOCX, загрузите новую редакцию, проверьте сопоставления и подготовьте PDF заново. Связанный блок может целиком перейти на следующую страницу.</p></details>
     <p className="muted">На Windows открытие приложений проверено в SumatraPDF 3.5.2. В PDF24 Reader 11.30.1 ссылки этого комплекта в подпапки не работают. Сохраняйте всю структуру распакованной папки.</p>
-    {status?.ready?<><div className="actions"><button aria-label="Предыдущая страница основного PDF" disabled={page<=1} onClick={()=>setPage(page-1)}>←</button><span>Страница {page} из {status.pages}</span><button aria-label="Следующая страница основного PDF" disabled={page>=status.pages} onClick={()=>setPage(page+1)}>→</button><a className="button" href={`/api/projects/${p.id}/main-pdf/download`}>Скачать основной PDF</a></div>{image?<img className="main-pdf-page" src={image} alt={`Основной PDF, страница ${page}`}/>:!error?<p>Готовим страницу…</p>:null}</>:null}
+    {status?.ready?<><div className="actions"><button aria-label="Предыдущая страница основного PDF" disabled={page<=1} onClick={()=>setPage(page-1)}>←</button><span>Страница {page} из {status.pages}</span><button aria-label="Следующая страница основного PDF" disabled={page>=status.pages} onClick={()=>setPage(page+1)}>→</button><PrivateLink className="button" href={`/api/projects/${p.id}/main-pdf/download`}>Скачать основной PDF</PrivateLink></div>{image?<img className="main-pdf-page" src={image} alt={`Основной PDF, страница ${page}`}/>:!error?<p>Готовим страницу…</p>:null}</>:null}
   </section>;
 }

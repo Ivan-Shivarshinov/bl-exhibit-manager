@@ -133,7 +133,7 @@ class MainPdf(unittest.TestCase):
         self.assertIn('path_hierarchy',[x['code'] for x in self.store.validate(self.p)])
 
     def test_http_preview_prepare_download_and_error(self):
-        from fastapi.testclient import TestClient
+        from tests.api_client import TestClient
         import exhibit.app as module
         with patch.object(module,'store',self.store),TestClient(module.app,base_url='http://127.0.0.1') as client:
             path=f'/api/projects/{self.p["id"]}/main-pdf'

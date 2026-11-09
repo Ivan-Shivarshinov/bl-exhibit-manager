@@ -20,13 +20,17 @@ from exhibit import pdf, word, backup, main_pdf
 from exhibit.project import Store
 
 
-def verify_api(base, output):
+def verify_api(base, output, authorization=None):
+    if authorization is None:
+        from exhibit.local_access import owner_headers
+        from exhibit.project import ROOT
+        authorization=owner_headers(base,ROOT)
     output.mkdir(parents=True,exist_ok=True); fixtures=output/'fixtures';fixtures.mkdir(exist_ok=True)
     source=form_pdf('signed'); (fixtures/'Annex 65.pdf').write_bytes(source)
     (fixtures/'References.docx').write_bytes(citation_docx(['Annex 65, Artificial form.','Annex 65, Artificial form.','Annex 999, Missing.','Manual title without identifier.']))
     def request(path,body=None,raw=None,expected=200):
         payload=json.dumps(body).encode() if body is not None else raw
-        req=Request(base+'/api'+path,data=payload,headers={'X-Exhibit-Local':'1','Content-Type':'application/json'})
+        req=Request(base+'/api'+path,data=payload,headers={**authorization,'Content-Type':'application/json'})
         try:
             with urlopen(req,timeout=90) as r: content=r.read(); status=r.status; mime=r.headers.get('Content-Type','')
         except HTTPError as exc: content=exc.read(); status=exc.code; mime=exc.headers.get('Content-Type','')
@@ -58,7 +62,7 @@ def verify_api(base, output):
         assert z.read('Submission/Evidence/Subfolder/Renamed.pdf')==source
     library_ready=False
     try:
-        with urlopen(base+'/api/libraries',timeout=30) as response: has_library=response.status==200
+        with urlopen(Request(base+'/api/libraries',headers=authorization),timeout=30) as response: has_library=response.status==200
     except HTTPError as exc:
         assert exc.code==404;has_library=False
     if has_library:

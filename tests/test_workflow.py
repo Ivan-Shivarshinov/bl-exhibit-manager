@@ -11,7 +11,7 @@ from urllib.parse import unquote
 
 from lxml import etree as E
 from pypdf import PdfReader, PdfWriter
-from fastapi.testclient import TestClient
+from tests.api_client import TestClient
 
 from exhibit import pdf, word
 from exhibit.project import Store, identifier, safe_path, review_digest

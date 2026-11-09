@@ -8,7 +8,7 @@ import sys
 import unittest
 from unittest.mock import patch
 
-from fastapi.testclient import TestClient
+from tests.api_client import TestClient
 from pypdf import PdfReader, PdfWriter
 
 from exhibit import translation_cli as cli

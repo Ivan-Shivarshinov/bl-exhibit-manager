@@ -63,7 +63,7 @@ export async function inspectUpdates(catalog) {
   });
 }
 
-export async function applyUpdates(catalog, plan, indices) {
+export async function applyUpdates(catalog, plan, indices, {fetch = globalThis.fetch} = {}) {
   if (catalog.version !== plan.catalogVersion) throw new Error('Приложения изменились. Повторите проверку ссылок.');
   return Word.run(async context => {
     await editable(context);

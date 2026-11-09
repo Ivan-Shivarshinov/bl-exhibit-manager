@@ -286,7 +286,7 @@ class BackupTests(TestCase):
         self.assertEqual(word_bridge.catalog(copied)['restored_bindings'], [])
 
     def test_preview_cancel_copy_and_streamed_download(self):
-        from fastapi.testclient import TestClient
+        from tests.api_client import TestClient
         from exhibit import app as module
         with patch.object(module, 'store', self.store), patch.object(module, 'translations', Translations(self.store)):
             client = TestClient(module.app, base_url='http://localhost', headers={'X-Exhibit-Local':'1'})

@@ -6,11 +6,16 @@ from uuid import uuid4
 import json
 import os
 import re
+import shutil
+from io import BytesIO
+from zipfile import ZipFile
 
 
 def manifest(store, project):
     from .project import identifier, revision, digest
-    return {'main': (project.get('main') or {}).get('sha256'),
+    from .index_settings import settings
+    config = settings(project)
+    return {'submission_index': config if config['enabled'] else None, 'main': (project.get('main') or {}).get('sha256'),
             'references': digest(project['references']),
             'documents': [{'id': d['id'], 'identifier': identifier(d, project), 'title': d['title'],
                            'filename': d['filename'], 'folder': d['folder'], 'revision': revision(project, d)} for d in project['documents']]}
@@ -21,7 +26,8 @@ def compare(old, new):
     return {'added': [after[k]['title'] for k in after.keys()-before.keys()],
             'removed': [before[k]['title'] for k in before.keys()-after.keys()],
             'changed': [after[k]['title'] for k in after.keys() & before.keys() if after[k] != before[k]],
-            'main_changed': old.get('main') != new['main'], 'references_changed': old.get('references') != new['references']}
+            'main_changed': old.get('main') != new['main'], 'references_changed': old.get('references') != new['references'],
+            'index_changed': old.get('submission_index') != new.get('submission_index') or old.get('index_files',[]) != new.get('index_files',[])}
 
 
 def list_exports(store, project):
@@ -34,14 +40,21 @@ def save_export(store, project, data):
     parent = store.folder(project['id']) / 'exports'; parent.mkdir(exist_ok=True)
     previous = list_exports(store, project)
     mid = uuid4().hex; content = manifest(store, project)
+    if content['submission_index']:
+        with ZipFile(BytesIO(data)) as archive:
+            content['index_files'] = [{'path':n,'kind':'submission_index','sha256':sha256(archive.read(n)).hexdigest()}
+                                     for n in archive.namelist() if n in ('Submission/Exhibit index.docx','Submission/Exhibit index.pdf')]
     meta = {'id': mid, 'created_at': datetime.now(timezone.utc).isoformat(), 'sha256': sha256(data).hexdigest(),
             'size': len(data), 'manifest': content, 'changes': compare(previous[0]['manifest'] if previous else {}, content)}
     staging = parent / ('.pending-'+mid); staging.mkdir()
     # Incomplete staging directories are never visible in history.
-    for name, value in [('Submission.zip', data), ('manifest.json', json.dumps(meta, ensure_ascii=False, indent=2).encode('utf-8'))]:
-        with (staging/name).open('xb') as stream:
-            stream.write(value); stream.flush(); os.fsync(stream.fileno())
-    staging.rename(parent/mid)
+    try:
+        for name, value in [('Submission.zip', data), ('manifest.json', json.dumps(meta, ensure_ascii=False, indent=2).encode('utf-8'))]:
+            with (staging/name).open('xb') as stream:
+                stream.write(value); stream.flush(); os.fsync(stream.fileno())
+        staging.rename(parent/mid)
+    finally:
+        if staging.exists(): shutil.rmtree(staging)
     return meta
 
 

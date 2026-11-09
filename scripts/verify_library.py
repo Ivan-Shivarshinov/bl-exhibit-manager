@@ -8,6 +8,7 @@ from urllib.error import HTTPError
 
 sys.path.insert(0,str(Path(__file__).resolve().parent.parent))
 from library_checks import verify,load_check
+from exhibit.local_access import owner_headers
 
 parser=argparse.ArgumentParser()
 parser.add_argument('--url',required=True)
@@ -16,9 +17,10 @@ parser.add_argument('--output',required=True,type=Path)
 parser.add_argument('--incoming',type=Path)
 parser.add_argument('--load',action='store_true')
 args=parser.parse_args()
+authorization=owner_headers(args.url,args.data)
 
 def request(path,body=None,raw=None):
-    req=Request(args.url+path,data=json.dumps(body).encode() if body is not None else raw,headers={'X-Exhibit-Local':'1','Content-Type':'application/json'})
+    req=Request(args.url+path,data=json.dumps(body).encode() if body is not None else raw,headers={**authorization,'Content-Type':'application/json'})
     try:
         with urlopen(req,timeout=120) as r:
             content=r.read();return json.loads(content) if 'json' in r.headers.get('Content-Type','') else content

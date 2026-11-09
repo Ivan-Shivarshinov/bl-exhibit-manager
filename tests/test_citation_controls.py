@@ -3,7 +3,7 @@ from tempfile import TemporaryDirectory
 from unittest import TestCase
 from unittest.mock import patch
 
-from fastapi.testclient import TestClient
+from tests.api_client import TestClient
 from lxml import etree as E
 from exhibit import word
 from exhibit.project import Store

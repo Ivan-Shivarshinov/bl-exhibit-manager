@@ -2,7 +2,7 @@ from types import SimpleNamespace
 from unittest import TestCase
 from unittest.mock import patch
 
-from fastapi.testclient import TestClient
+from tests.api_client import TestClient
 from exhibit.app import app
 from exhibit.word_connection import WordPanels
 from exhibit import diagnostics

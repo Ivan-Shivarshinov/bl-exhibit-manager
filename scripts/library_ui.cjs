@@ -1,10 +1,11 @@
+const enterApp=require('./local_browser_access.cjs');
 // Run against an isolated app; artifacts and synthetic fixtures stay outside Git.
 const {chromium}=require('../web/node_modules/playwright');
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
 const base=process.env.LIBRARY_QA_URL||'http://127.0.0.1:60055',dir=process.env.LIBRARY_QA_OUTPUT;
 assert(dir,'Set LIBRARY_QA_OUTPUT to an isolated synthetic output directory.');
 (async()=>{const browser=await chromium.launch({...(process.env.BROWSER_CHANNEL?{channel:process.env.BROWSER_CHANNEL}:{})});try{
- const page=await browser.newPage({viewport:{width:1440,height:1000}});const errors=[];page.on('pageerror',e=>errors.push(e.message));await page.goto(base);await page.locator('header .project-switch select:enabled').waitFor();
+ const page=await browser.newPage({viewport:{width:1440,height:1000}});const errors=[];page.on('pageerror',e=>errors.push(e.message));await enterApp(page,base);await page.locator('header .project-switch select:enabled').waitFor();
  // Old optional PDF path, without creating or assigning a library.
  await page.locator('header').getByRole('button',{name:'Новая',exact:true}).click();await page.getByLabel('Название',{exact:true}).fill('UI independent ready PDFs '+Date.now());await page.getByRole('button',{name:'Создать',exact:true}).click();
  await page.locator('.modal-backdrop').waitFor({state:'hidden'});await page.waitForFunction(()=>!document.querySelector('input[aria-label="Добавить готовые PDF"]').disabled);await page.getByLabel('Добавить готовые PDF',{exact:true}).setInputFiles(path.join(dir,'fixtures','Material 000.pdf'));await page.locator('.row-button').waitFor();await page.getByRole('button',{name:/Проверка и экспорт/}).click();let downloading=page.waitForEvent('download');await page.getByRole('button',{name:'Собрать подачу · ZIP',exact:true}).click();await(await downloading).saveAs(path.join(dir,'ui-independent.zip'));
@@ -22,7 +23,7 @@ assert(dir,'Set LIBRARY_QA_OUTPUT to an isolated synthetic output directory.');
  await page.keyboard.press('Escape');assert.equal(await page.locator('.library-dialog').count(),0);assert.equal(await page.getByRole('button',{name:'Библиотеки дел',exact:true}).evaluate(e=>e===document.activeElement),true);
  await page.getByRole('button',{name:/Проверка и экспорт/}).click();downloading=page.waitForEvent('download');await page.getByRole('button',{name:'Собрать подачу · ZIP',exact:true}).click();await(await downloading).saveAs(path.join(dir,'ui-bulk.zip'));
  // Two independent local conflicts remain visible until one final re-comparison.
- const api=async(route,body)=>{const response=body===undefined?await page.request.get(base+'/api'+route):await page.request.post(base+'/api'+route,{data:body,headers:{'X-Exhibit-Local':'1'}});assert(response.ok(),await response.text());return response.json();};
+ const api=async(route,body)=>{const response=body===undefined?await require('./local_browser_access.cjs').request(page,base).get(base+'/api'+route):await require('./local_browser_access.cjs').request(page,base).post(base+'/api'+route,{data:body,headers:{'X-Exhibit-Local':'1'}});assert(response.ok(),await response.text());return response.json();};
  const operation=async(action,args)=>{const job=await api('/material-operations',{action,arguments:args});for(let i=0;i<600;i++){const state=await api('/material-operations/'+job.id);if(state.state==='complete')return state.result;assert(!['error','cancelled','interrupted'].includes(state.state),state.message);await new Promise(r=>setTimeout(r,100));}throw Error('Operation timed out');};
  const pid=await page.getByLabel('Проект',{exact:true}).inputValue(),project=await api('/projects/'+pid),doc=project.documents.find(d=>d.provenance);assert(doc);
  const preview=await operation('save_preview',{lid,pid,rows:[{document_id:doc.id,material_id:doc.provenance.material_id,allow_duplicate:true,metadata:{title:'Library revised title',short_title:'Library revised short'}}]});await operation('publish',{token:preview.token});

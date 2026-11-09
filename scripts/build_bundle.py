@@ -39,6 +39,9 @@ def notices(destination):
 
 def main():
     os.chdir(ROOT)
+    import ssl
+    if 'codex-rejected-cas.pem' in ssl.SSLContext.__new__.__code__.co_consts:
+        raise SystemExit('Build with standard CPython 3.12, as in CI. The bundled Codex runtime patches SSLContext to load a local service file and is unsuitable for distributable apps. No files were packaged.')
     system={'win32':'windows','darwin':'macos'}.get(sys.platform)
     if not system:raise SystemExit('Build on Windows or macOS.')
     if system=='macos':
