@@ -69,8 +69,22 @@ class VolumeService(TestCase):
         export=self.jobs.start(self.p['id'],'export',state['result']['preview_token'])['id'];state=self.wait(export)
         self.assertEqual(state['state'],'complete',state)
         path=self.jobs.download(export);self.assertTrue(path.is_file())
-        self.jobs.release(export);self.assertFalse(path.exists())
+        self.jobs.release(export);self.assertTrue(path.is_file())
+        with self.assertRaisesRegex(ValueError,'историю'):self.jobs.download(export)
         self.assertEqual(len(history.list_exports(self.store,self.p)),1)
+
+    def test_unclaimed_downloads_use_history_without_duplicate_temporary_archives(self):
+        plan=self.jobs.preview(self.p['id']);paths=[]
+        for _ in range(3):
+            token=self.jobs.start(self.p['id'],'export',plan['preview_token'])['id'];state=self.wait(token)
+            self.assertEqual(state['state'],'complete',state)
+            path=self.jobs.download(token);paths.append(path)
+            self.assertEqual(path.parent.name,state['result']['export_id'])
+            self.assertEqual(path.parent.parent.name,'exports')
+        self.assertEqual(len(list(self.jobs.work.iterdir())),1) # Only the bounded prepared snapshot.
+        self.jobs.close();self.assertFalse(list(self.jobs.work.iterdir()))
+        self.assertTrue(all(path.is_file() for path in paths))
+        self.assertEqual(len(history.list_exports(self.store,self.p)),3)
 
     def test_same_clock_tick_keeps_newest_export_first(self):
         from datetime import datetime,timezone

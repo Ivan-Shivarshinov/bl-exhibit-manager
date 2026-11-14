@@ -173,7 +173,7 @@ class VolumeJobs:
         return data
 
     @io_errors()
-    def export_bytes(self,pid,token,stop=lambda:False,progress=lambda *args:None):
+    def export_bytes(self,pid,token,stop=lambda:False,progress=lambda *args:None,with_receipt=False):
         plan=self.plan(pid,token)
         if plan['issues']:raise ValueError(plan['issues'][0])
         with LOCK:p=self.current(pid,token)
@@ -210,8 +210,8 @@ class VolumeJobs:
             archive.writestr('Submission/Volumes/Volume map.json',json.dumps(plan['mapping'],ensure_ascii=False,indent=2).encode('utf-8'))
         volumes.cancelled(stop);data=out.getvalue()
         if shutil.disk_usage(self.store.root).free<len(data)*2+16_000_000:raise ValueError('Недостаточно места для сохранения истории комплекта.')
-        with LOCK:self.current(pid,token);history.save_export(self.store,p,data)
-        return data
+        with LOCK:self.current(pid,token);receipt=history.save_export(self.store,p,data)
+        return (data,receipt) if with_receipt else data
 
     def status(self,token):
         if not isinstance(token,str) or not re.fullmatch('[a-f0-9]{32}',token):raise ValueError('Некорректное задание PDF-томов.')
@@ -246,11 +246,11 @@ class VolumeJobs:
             try:
                 if action=='preview':result=self.preview(pid,event.is_set,progress)
                 else:
-                    data=self.export_bytes(pid,preview_token,event.is_set,progress)
-                    temporary=TemporaryDirectory(prefix='download-',dir=self.work)
-                    (Path(temporary.name)/'Submission.zip').write_bytes(data)
-                    with self.lock:self.downloads[token]=temporary
-                    result={'download_token':token,'bytes':len(data)}
+                    data,receipt=self.export_bytes(pid,preview_token,event.is_set,progress,with_receipt=True)
+                    # The immutable history file is already complete. A closed
+                    # browser must not leave a second, unclaimed ZIP on disk.
+                    with self.lock:self.downloads[token]=(pid,receipt['id'])
+                    result={'download_token':token,'bytes':len(data),'export_id':receipt['id']}
                 with self.lock:state.update(state='complete',result=result,message='PDF-тома готовы')
             except Exception as exc:
                 with self.lock:state.update(state='cancelled' if event.is_set() else 'error',message=str(exc))
@@ -263,6 +263,7 @@ class VolumeJobs:
                     finished=sorted((p for p in self.states.glob('*.json') if re.fullmatch('[a-f0-9]{32}',p.stem) and p.stem not in self.active),key=lambda p:p.stat().st_mtime,reverse=True)
                     for old in finished[20:]:
                         self.memory.pop(old.stem,None)
+                        self.downloads.pop(old.stem,None)
                         try:old.unlink(missing_ok=True)
                         except OSError:pass  # A retained status must not fail a completed export.
         try:Thread(target=work,daemon=True,name='volume-'+token[:8]).start()
@@ -282,19 +283,20 @@ class VolumeJobs:
 
     def download(self,token):
         self.status(token)
-        with self.lock:temporary=self.downloads.get(token)
-        if not temporary:raise ValueError('Скачивание завершено. Используйте историю комплектов.')
-        return Path(temporary.name)/'Submission.zip'
+        with self.lock:receipt=self.downloads.get(token)
+        if not receipt:raise ValueError('Скачивание завершено. Используйте историю комплектов.')
+        pid,eid=receipt
+        with LOCK:
+            p=self.store.load(pid);history.read_export(self.store,p,eid)
+        return self.store.folder(pid)/'exports'/eid/'Submission.zip'
 
     def release(self,token):
-        with self.lock:temporary=self.downloads.pop(token,None)
-        if temporary:temporary.cleanup()
+        with self.lock:self.downloads.pop(token,None)
 
     def close(self):
         with self.lock:
             for stopped in self.active.values():stopped.set()
             for plan in self.plans.values():plan['temporary'].cleanup()
-            for temporary in self.downloads.values():temporary.cleanup()
             self.plans.clear();self.downloads.clear()
 
 
