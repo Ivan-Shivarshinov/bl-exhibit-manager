@@ -40,9 +40,17 @@ def main():
                 try:
                     window=wait_for(lambda:next((w for w in desk.windows(proc.pid) if source in w['title']),None),'source window')
                     hwnd=window['hwnd'];desk.u.ShowWindow(hwnd,9);desk.u.SetWindowPos(hwnd,W.HWND(-1),10,10,1000,740,0x40);desk.u.SetForegroundWindow(hwnd)
+                    earliest=time.monotonic()+.6;last=[None,0]
                     def rendered():
                         image,bounds=desk.capture(hwnd);origin=page_origin(image,2/3,visual_width)
-                        if origin:return image,bounds,origin
+                        # A white page can still be at the old position while
+                        # WM_SIZE is repainting the canvas. Never click that frame.
+                        tiny=image.resize((100,74)).convert('RGB')
+                        black=sum(max(pixel)<25 for pixel in tiny.getdata())/7400
+                        key=(origin,bounds.left,bounds.top,bounds.right,bounds.bottom)
+                        valid=origin and black<.03 and time.monotonic()>=earliest
+                        last[1]=last[1]+1 if valid and key==last[0] else int(bool(valid));last[0]=key
+                        if last[1]>=3:return image,bounds,origin
                         image.save(out/(name+'-waiting.png'))
                     image,bounds,origin=wait_for(rendered,'rendered source page');image.save(out/(name+'-source.png'))
                     height=float(source_page.cropbox.top)
