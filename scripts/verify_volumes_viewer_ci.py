@@ -36,7 +36,7 @@ def main():
                 name=where+'-'+label;profile=tools/name;profile.mkdir()
                 source_pdf=PdfReader(folder/'Volumes'/source);source_page=source_pdf.pages[page-1]
                 visual_width=float(source_page.cropbox.height if source_page.rotation%180 else source_page.cropbox.width)
-                proc=subprocess.Popen([str(tools/'SumatraPDF-3.6.1-64.exe'),'-appdata',str(profile),'-new-window','-page',str(page),'-zoom','50',str(folder/'Volumes'/source)],cwd=tools)
+                proc=subprocess.Popen([str(tools/'SumatraPDF-3.6.1-64.exe'),'-appdata',str(profile),'-new-window','-view','single page','-page',str(page),'-zoom','50',str(folder/'Volumes'/source)],cwd=tools)
                 try:
                     window=wait_for(lambda:next((w for w in desk.windows(proc.pid) if source in w['title']),None),'source window')
                     hwnd=window['hwnd'];desk.u.ShowWindow(hwnd,9);desk.u.SetWindowPos(hwnd,W.HWND(-1),10,10,1000,740,0x40);desk.u.SetForegroundWindow(hwnd)
