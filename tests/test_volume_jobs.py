@@ -167,6 +167,8 @@ class VolumeService(TestCase):
             self.assertEqual([int(a['/D'][0]) for a in normal_targets],[0,1])
             self.assertTrue(all(a['/F']['/UF']=='Annex 1.pdf' for a in normal_targets))
         self.store.update(self.p,did,{'title':'Changed source revision'})
+        self.store.scan(self.p)
+        self.store.confirm_links(self.p)
         with patch('exhibit.main_pdf.convert_docx',side_effect=converter):changed=self.jobs.preview(self.p['id'])
         self.assertTrue(any('Цель ссылки устарела' in v for v in changed['issues']))
         with self.assertRaisesRegex(ValueError,'устарела'):self.jobs.export_bytes(self.p['id'],changed['preview_token'])
