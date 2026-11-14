@@ -34,16 +34,18 @@ def main():
         for where,folder in (('before',before),('after',after)):
             for label,source,page,annotation,destination,dest_page in matrix:
                 name=where+'-'+label;profile=tools/name;profile.mkdir()
+                source_pdf=PdfReader(folder/'Volumes'/source);source_page=source_pdf.pages[page-1]
+                visual_width=float(source_page.cropbox.height if source_page.rotation%180 else source_page.cropbox.width)
                 proc=subprocess.Popen([str(tools/'SumatraPDF-3.6.1-64.exe'),'-appdata',str(profile),'-new-window','-page',str(page),'-zoom','50',str(folder/'Volumes'/source)],cwd=tools)
                 try:
                     window=wait_for(lambda:next((w for w in desk.windows(proc.pid) if source in w['title']),None),'source window')
-                    hwnd=window['hwnd'];desk.u.ShowWindow(hwnd,9);desk.u.SetWindowPos(hwnd,W.HWND(-1),10,10,1000,900,0x40);desk.u.SetForegroundWindow(hwnd)
+                    hwnd=window['hwnd'];desk.u.ShowWindow(hwnd,9);desk.u.SetWindowPos(hwnd,W.HWND(-1),10,10,1000,740,0x40);desk.u.SetForegroundWindow(hwnd)
                     def rendered():
-                        image,bounds=desk.capture(hwnd);origin=page_origin(image,2/3)
+                        image,bounds=desk.capture(hwnd);origin=page_origin(image,2/3,visual_width)
                         if origin:return image,bounds,origin
                         image.save(out/(name+'-waiting.png'))
                     image,bounds,origin=wait_for(rendered,'rendered source page');image.save(out/(name+'-source.png'))
-                    source_pdf=PdfReader(folder/'Volumes'/source);height=float(source_pdf.pages[page-1].cropbox.top)
+                    height=float(source_page.cropbox.top)
                     x0,y0,x1,y1=map(float,annotation['/Rect']);scale=2/3
                     desk.click(round(bounds.left+origin[0]+(x0+x1)/2*scale),round(bounds.top+origin[1]+(height-(y0+y1)/2)*scale))
                     opened=wait_for(lambda:next((w for w in desk.windows(proc.pid) if destination in w['title']),None),'clicked target')

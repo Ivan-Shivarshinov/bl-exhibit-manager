@@ -213,7 +213,7 @@ jobs:
           path: output/volume-office
           if-no-files-found: error
   volume-viewer:
-    needs: [native-package, volume-office]
+    needs: volume-office
     if: ${{ !inputs.viewer_only }}
     runs-on: windows-2022
     timeout-minutes: 12
