@@ -38,6 +38,15 @@ class ProfileTests(TestCase):
         p=self.profiles.apply(*args,preview['token'])
         self.assertEqual(effective_format(p,p['documents'][0])[0]['designation'],'Annex')
         self.assertEqual(p['documents'][0]['filename'],'Manual.pdf');self.assertEqual(p['documents'][0]['number'],12)
+
+    def test_corrupted_embedded_version_is_rejected_without_rewriting_project(self):
+        package=self.profiles.create('Rules',capture(self.p));version=package['versions'][0]
+        args=(self.p['id'],package['profile_id'],version['version_id'],OPTIONS)
+        _,preview=self.profiles.preview(*args);p=self.profiles.apply(*args,preview['token'])
+        p['applied_profile']['name']='Tampered rules';self.s.save(p)
+        file=self.s.folder(p['id'])/'project.json';before=file.read_bytes()
+        with self.assertRaisesRegex(ValueError,'сумма'):self.s.load(p['id'])
+        self.assertEqual(file.read_bytes(),before)
         self.assertEqual(p['applied_profile'],version)
         later=self.profiles.create('New',{**capture(self.p),'format':{'designation':'Exhibit'}},package['profile_id'])
         self.assertEqual(self.s.load(p['id'])['applied_profile'],version)

@@ -69,6 +69,32 @@ class Volumes(unittest.TestCase):
                 from exhibit import pdf
                 self.assertTrue(pdf.render_png(files['Volume 01.pdf'],2).startswith(b'\x89PNG'))
 
+    def test_overlay_number_and_return_are_inside_crop_and_source_raster_survives_band(self):
+        import pypdfium2 as pdfium
+        from PIL import Image,ImageChops
+        from exhibit import pdf
+        for position in ('top-right','bottom-right','bottom-center'):
+            files,m=volumes.build([item(1)],self.config(position=position,start=123456,dividers=False))
+            with pdfium.PdfDocument(files['Volume 01.pdf']) as document:
+                page=document[1];text=page.get_textpage();value=text.get_text_range();start=value.index('123457')
+                for i in range(start,start+6):
+                    left,bottom,right,top=text.get_charbox(i)
+                    self.assertGreaterEqual(left,0);self.assertLessEqual(right,page.get_width())
+                text.close();page.close()
+        for rotation in (0,90,180,270):
+            source=item(1,form=True,rotation=rotation)
+            files,m=volumes.build([source],self.config(dividers=False))
+            original=Image.open(BytesIO(pdf.render_png(source['data'],1,scale=1))).convert('RGB')
+            result=Image.open(BytesIO(pdf.render_png(files['Volume 01.pdf'],2,scale=1))).convert('RGB')
+            self.assertEqual(result.size,(original.width,original.height+30))
+            self.assertIsNone(ImageChops.difference(original,result.crop((0,30,result.width,result.height))).getbbox(),rotation)
+
+    def test_two_forms_with_same_field_name_stay_independent(self):
+        files,m=volumes.build([item(1,form=True),item(2,form=True)],self.config())
+        reader=PdfReader(BytesIO(files['Volume 01.pdf']))
+        self.assertEqual(len(reader.get_fields()),2)
+        self.assertTrue(all(f.get('/V')=='REVIEWED' for f in reader.get_fields().values()))
+
     def test_single_volume_map_toc_bookmarks_sources_and_unrelated_links(self):
         items=[item(1,2),item(2)];before=[i['data'] for i in items]
         files,m=volumes.build(items,self.config(start=12))

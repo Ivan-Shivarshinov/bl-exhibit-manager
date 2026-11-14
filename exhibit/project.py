@@ -114,6 +114,9 @@ class Store:
         volume_settings(result)
         from .assignments import validate_project
         validate_project(result)
+        if result.get('applied_profile') is not None:
+            from .submission_profiles import validate_version
+            validate_version(result['applied_profile'])
         return result
 
     def save(self, p):

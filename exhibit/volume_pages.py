@@ -117,7 +117,13 @@ def namespace(reader, prefix):
         else:
             for value in obj:walk(value,depth+1)
     if names:walk(root)
-    if reader.get_fields():reader.add_form_topname(prefix.rstrip('.'))
+    if reader.get_fields():
+        # Rename existing top fields instead of inserting an artificial parent.
+        # PDFium stops drawing some widgets under such a synthetic field group.
+        form=root['/AcroForm']
+        for index,entry in enumerate(form['/Fields']):
+            field=entry.get_object()
+            field[NameObject('/T')]=TextStringObject(prefix.rstrip('.')+'_'+str(field.get('/T',index)))
 
 
 def stamp_number(writer, index, label, position):
@@ -141,7 +147,9 @@ def stamp_number(writer, index, label, position):
     glyphs=pdfmetrics.getFont('DejaVu').face.charToGlyph
     if any(ord(char) not in glyphs for char in label):raise ValueError('Шрифт не поддерживает символ подписи страницы. Измените подпись.')
     if tw>vw-100:raise ValueError('Подпись страницы слишком длинная для ширины листа.')
-    x=(vw-tw)/2 if position=='bottom-center' else vw-24-tw
+    total_width=tw+(65 if position!='band' else 0)
+    if total_width>vw-48:raise ValueError('Номер и возврат к перечню не помещаются по ширине листа.')
+    x=(vw-total_width)/2 if position=='bottom-center' else vw-24-total_width
     y=vh-19 if position in ('band','top-right') else 15
     if position!='band':
         import pypdfium2 as pdfium
@@ -154,7 +162,7 @@ def stamp_number(writer, index, label, position):
                 if not environment:raise ValueError('Не удалось проверить поля PDF под номером страницы.')
                 document.formenv=pdfium.PdfFormEnv(environment,config)
             source=document[0]
-            bitmap=source.render(scale=1.5,crop=(max(0,x-2),max(0,y-3),max(0,vw-x-tw-2),max(0,vh-y-11)),limit_image_cache=True,draw_annots=True)
+            bitmap=source.render(scale=1.5,crop=(max(0,x-2),max(0,y-3),max(0,vw-x-total_width-2),max(0,vh-y-11)),limit_image_cache=True,draw_annots=True)
             try:
                 image=bitmap.to_pil().convert('RGB')
                 if sum(min(p)<235 for p in image.get_flattened_data())>3:
