@@ -20,6 +20,8 @@ def main():
         for n in range(1,4):
             store.upload(p,f'Annex {n}.pdf',make_pdf('Synthetic',[[f'Synthetic material {n}']]),mode='passthrough')
             store.update(p,p['documents'][-1]['id'],{'designation':'Annex','number':n,'folder':'Папка #','title':f'Материал {n}'})
+        cancel_source=Path(data)/'cancel-source.pdf'
+        cancel_source.write_bytes(make_pdf('Synthetic cancellation',[[f'Cancellation page {n}'] for n in range(1000)]))
         with socket.socket() as sock:sock.bind(('127.0.0.1',0));port=sock.getsockname()[1]
         env={**os.environ,'EXHIBIT_DATA_DIR':data,'PYTHONDONTWRITEBYTECODE':'1'}
         flags={'creationflags':subprocess.CREATE_NO_WINDOW} if os.name=='nt' else {'start_new_session':True}
@@ -31,7 +33,7 @@ def main():
                 try:entry=browser_entry(port,Path(data));break
                 except (ValueError,OSError):time.sleep(.1)
             if not entry:raise RuntimeError('Isolated server did not start')
-            subprocess.run(['node',str(ROOT/'scripts/volumes_ui.cjs')],cwd=ROOT,env={**env,'EXHIBIT_BROWSER_ENTRY':entry,'VOLUME_QA_URL':f'http://127.0.0.1:{port}','VOLUME_QA_OUTPUT':str(out),'VOLUME_QA_PID':p['id']},check=True,timeout=100)
+            subprocess.run(['node',str(ROOT/'scripts/volumes_ui.cjs')],cwd=ROOT,env={**env,'EXHIBIT_BROWSER_ENTRY':entry,'VOLUME_QA_URL':f'http://127.0.0.1:{port}','VOLUME_QA_OUTPUT':str(out),'VOLUME_QA_PID':p['id'],'VOLUME_QA_CANCEL_PDF':str(cancel_source)},check=True,timeout=150)
             with ZipFile(out/'UI-Submission.zip') as z:
                 names=z.namelist();assert len([n for n in names if n.startswith('Submission/Volumes/') and n.endswith('.pdf')])==3
                 mapping=json.loads(z.read('Submission/Volumes/Volume map.json'));assert len(mapping['pages'])==3

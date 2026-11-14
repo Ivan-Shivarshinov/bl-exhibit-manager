@@ -68,7 +68,22 @@ const base=process.env.VOLUME_QA_URL,out=process.env.VOLUME_QA_OUTPUT;
   await(await renumberDownload).saveAs(path.join(out,'UI-Renumbered.zip'));
   await page.screenshot({path:path.join(out,'assignments-preview.png'),fullPage:true});
   await page.screenshot({path:path.join(out,'profiles-preview.png'),fullPage:true});
+  // Real cancel and retry through the UI, on a separate disposable large fixture.
+  const cancelProject=await(await request.post(base+'/api/projects',{data:{name:'Synthetic cancellation'}})).json();
+  const cancelRoute=base+'/api/projects/'+cancelProject.id;
+  assert((await request.post(cancelRoute+'/upload?name=Cancel.pdf&mode=passthrough',{data:fs.readFileSync(process.env.VOLUME_QA_CANCEL_PDF)})).ok());
+  const cancelConfig=(await(await request.get(cancelRoute)).json()).volume_settings;
+  assert((await request.post(cancelRoute+'/volumes/settings',{data:{...cancelConfig,enabled:true}})).ok());
+  await page.reload();
+  await page.getByLabel('Проект',{exact:true}).selectOption(cancelProject.id);
+  await page.getByRole('button',{name:'Проверка и экспорт',exact:true}).click();
+  await prepare.click();await panel.getByRole('button',{name:'Отменить сборку томов',exact:true}).click();
+  await panel.getByRole('alert').filter({hasText:'отменена'}).waitFor({timeout:20000});
+  assert.equal((await(await request.get(cancelRoute+'/exports')).json()).length,0);
+  await prepare.click();await panel.getByRole('heading',{name:'Состав и страницы томов'}).waitFor({timeout:45000});
+  assert(await panel.getByRole('button',{name:'Скачать ZIP с PDF-томами',exact:true}).isEnabled());
+  await page.screenshot({path:path.join(out,'cancel-retry.png'),fullPage:true});
   assert.equal(errors.length,0,errors.join('\n'));
-  fs.writeFileSync(path.join(out,'UI-RESULT.json'),JSON.stringify({passed:true,volumes:3,checks:['settings','preview','rendered page','ZIP download','stale','invalid setting','ordinary export restored','profile create/preview/apply/export/import/error/new version','swap occupied numbers/filenames and download ZIP'],pageErrors:errors},null,2));
+  fs.writeFileSync(path.join(out,'UI-RESULT.json'),JSON.stringify({passed:true,volumes:3,checks:['settings','preview','rendered page','ZIP download','stale','invalid setting','ordinary export restored','profile create/preview/apply/export/import/error/new version','swap occupied numbers/filenames and download ZIP','cancel 1000-page job/no history/retry'],pageErrors:errors},null,2));
  }finally{await browser.close();}
 })().catch(e=>{console.error(e);process.exitCode=1;});

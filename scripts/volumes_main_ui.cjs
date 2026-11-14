@@ -12,6 +12,7 @@ const assert=require('node:assert/strict'),path=require('node:path'),fs=require(
   const panel=page.locator('.volume-section'),prepare=panel.getByRole('button',{name:'Подготовить PDF-тома',exact:true});
   await prepare.click();await panel.getByRole('heading',{name:'Состав и страницы томов'}).waitFor({timeout:60000});
   const first=panel.locator('.volume-preview details label').filter({hasText:'Сноска 1'}).first();
+  assert.match(await first.locator('small').textContent(),/Оригинал.*исходная стр\./);
   await first.locator('input').fill('1');await first.getByRole('button',{name:'Подтвердить страницу',exact:true}).click();
   assert(await panel.getByRole('button',{name:'Скачать ZIP с PDF-томами',exact:true}).isDisabled());
   await panel.getByRole('button',{name:'Сохранить настройки томов',exact:true}).click();
