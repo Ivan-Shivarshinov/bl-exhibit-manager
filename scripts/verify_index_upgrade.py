@@ -40,8 +40,14 @@ def running(archive,root,data,slot):
             with urlopen(base+'/api/health',timeout=5) as response: version=json.load(response)['version']
             if version=='0.5.1': authorization={'X-Exhibit-Local':'1'} # Explicit, hash-verified legacy package under test only.
             else:
-                from exhibit.local_access import owner_headers
-                authorization=owner_headers(base,data)
+                from exhibit import local_access
+                if version=='0.6.0':
+                    # Only the hash-verified released fixture uses its older
+                    # version in HMAC verification. No signature/owner check is bypassed.
+                    from unittest.mock import patch
+                    with patch.object(local_access,'__version__','0.6.0'):
+                        authorization=local_access.owner_headers(base,data)
+                else:authorization=local_access.owner_headers(base,data)
         payload=json.dumps(body).encode() if body is not None else raw
         req=Request(f'http://127.0.0.1:{port}'+path,data=payload,method=method,headers={**authorization,'Content-Type':'application/json'})
         try:

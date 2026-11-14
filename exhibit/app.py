@@ -624,6 +624,14 @@ def volume_pdf(pid:str,token:str,index:int):
     return Response(manager(store).read_volume(pid,token,index),media_type='application/pdf')
 
 
+@app.get('/api/projects/{pid}/volumes/{token}/{index}/navigation')
+def volume_navigation(pid:str,token:str,index:int,page:int=1):
+    from .volume_jobs import manager
+    from .volume_pages import navigation
+    service=manager(store);plan=service.plan(pid,token);data=service.read_volume(pid,token,index)
+    return navigation(data,page,[v['file'] for v in plan['mapping']['volumes']],index)
+
+
 @app.patch('/api/projects/{pid}/submission-index')
 async def save_index_settings(pid: str, request: Request):
     from .index_settings import save

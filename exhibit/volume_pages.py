@@ -16,6 +16,31 @@ from .index_documents import wrap,check_text
 BAND = 30
 
 
+def navigation(data,page_number,filenames,own_volume):
+    """Only our validated PDF destinations; physical coordinates -> visual percentages."""
+    reader=PdfReader(BytesIO(data))
+    if type(page_number) is not int or not 1<=page_number<=len(reader.pages):raise ValueError('Страница вне PDF-тома.')
+    page=reader.pages[page_number-1];x0,y0,x1,y1=map(float,page.cropbox);rotation=page.rotation%360
+    width,height=(y1-y0,x1-x0) if rotation in (90,270) else (x1-x0,y1-y0)
+    def visual(x,y):
+        return {0:(x-x0,y1-y),90:(y-y0,x-x0),180:(x1-x,y-y0),270:(y1-y,x1-x)}[rotation]
+    page_ids={p.indirect_reference.idnum:n+1 for n,p in enumerate(reader.pages)};links=[]
+    for entry in page.get('/Annots',[]):
+        ann=entry.get_object()
+        if not ann.get('/BLVolumeLink'):continue
+        action=ann['/A'];dest=action['/D']
+        if action['/S']=='/GoTo':volume=own_volume;target=page_ids[dest[0].idnum]
+        elif action['/S']=='/GoToR':volume=filenames.index(str(action['/F']['/UF']));target=int(dest[0])+1
+        else:continue
+        left,bottom,right,top=map(float,ann['/Rect']);points=[visual(x,y) for x,y in ((left,bottom),(right,bottom),(left,top),(right,top))]
+        xs,ys=zip(*points);l,r=max(0,min(xs)),min(width,max(xs));t,b=max(0,min(ys)),min(height,max(ys))
+        if r<=l or b<=t:continue
+        links.append({'volume_index':volume,'page':target,'left':l/width*100,'top':t/height*100,
+                      'width':(r-l)/width*100,'height':(b-t)/height*100,
+                      'label':'К перечню' if volume==own_volume and target==1 else f'Том {volume+1}, страница {target}'})
+    return {'links':links,'page':page_number,'pages':len(reader.pages)}
+
+
 def file_action(filename, page):
     return DictionaryObject({NameObject('/S'): NameObject('/GoToR'),
         NameObject('/F'): DictionaryObject({NameObject('/Type'): NameObject('/Filespec'),

@@ -109,12 +109,16 @@ class VolumeService(TestCase):
             image=client.get(url+f"/volumes/{plan['preview_token']}/0/image?page=1")
             self.assertEqual(image.status_code,200,image.text[:100] if image.status_code!=200 else '')
             self.assertEqual(image.content[:8],b'\x89PNG\r\n\x1a\n')
+            nav=client.get(url+f"/volumes/{plan['preview_token']}/0/navigation?page=1")
+            self.assertEqual(nav.status_code,200,nav.text)
+            self.assertEqual(len(nav.json()['links']),3)
             data=client.post(url+'/export',json={'preview_token':plan['preview_token']},headers=h)
             self.assertEqual(data.status_code,200,data.text[:100] if data.status_code!=200 else '')
             bad=client.post(url+'/volumes/settings',json={**self.p['volume_settings'],'start':False},headers=h)
             self.assertEqual(bad.status_code,400)
             self.p['name']='Changed from another window';self.store.save(self.p)
             self.assertEqual(client.get(url+f"/volumes/{plan['preview_token']}/0/pdf").status_code,400)
+            self.assertEqual(client.get(url+f"/volumes/{plan['preview_token']}/0/navigation?page=1").status_code,400)
 
     def test_cancel_during_preparation_removes_owned_temporary_and_preserves_history(self):
         entered=Event();release=Event();real=self.store.prepare

@@ -68,6 +68,12 @@ class Volumes(unittest.TestCase):
                 self.assertIn('SOURCE-1-1',page.extract_text())
                 from exhibit import pdf
                 self.assertTrue(pdf.render_png(files['Volume 01.pdf'],2).startswith(b'\x89PNG'))
+                from exhibit.volume_pages import navigation
+                nav=navigation(files['Volume 01.pdf'],2,list(files),0)
+                self.assertEqual(len(nav['links']),1);back=nav['links'][0]
+                self.assertEqual((back['volume_index'],back['page']),(0,1))
+                self.assertGreaterEqual(back['left'],0);self.assertGreaterEqual(back['top'],0)
+                self.assertLess(back['top'],10);self.assertLess(back['left']+back['width'],101)
 
     def test_overlay_number_and_return_are_inside_crop_and_source_raster_survives_band(self):
         import pypdfium2 as pdfium
