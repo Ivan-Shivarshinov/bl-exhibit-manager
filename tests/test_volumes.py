@@ -95,6 +95,14 @@ class Volumes(unittest.TestCase):
         self.assertEqual(len(reader.get_fields()),2)
         self.assertTrue(all(f.get('/V')=='REVIEWED' for f in reader.get_fields().values()))
 
+    def test_calculated_form_refused_instead_of_breaking_field_name_references(self):
+        from pypdf.generic import ArrayObject,NameObject
+        source=item(1,form=True);writer=PdfWriter(clone_from=BytesIO(source['data']))
+        form=writer.root_object['/AcroForm'];form[NameObject('/CO')]=ArrayObject([form['/Fields'][0]])
+        raw=BytesIO();writer.write(raw);source['data']=raw.getvalue();before=source['data']
+        with self.assertRaisesRegex(ValueError,'вычислениями'):volumes.build([source],self.config())
+        self.assertEqual(source['data'],before)
+
     def test_single_volume_map_toc_bookmarks_sources_and_unrelated_links(self):
         items=[item(1,2),item(2)];before=[i['data'] for i in items]
         files,m=volumes.build(items,self.config(start=12))

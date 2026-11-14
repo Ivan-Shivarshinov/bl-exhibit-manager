@@ -72,6 +72,19 @@ class VolumeService(TestCase):
         self.jobs.release(export);self.assertFalse(path.exists())
         self.assertEqual(len(history.list_exports(self.store,self.p)),1)
 
+    def test_same_clock_tick_keeps_newest_export_first(self):
+        from datetime import datetime,timezone
+        plan=self.jobs.preview(self.p['id'])
+        with patch('exhibit.history.datetime',wraps=datetime) as clock:
+            clock.now.return_value=datetime(2026,1,1,tzinfo=timezone.utc)
+            self.jobs.export_bytes(self.p['id'],plan['preview_token'])
+            first=history.list_exports(self.store,self.p)[0]
+            self.store.export(self.p,include_volumes=False)
+        exports=history.list_exports(self.store,self.p)
+        self.assertGreater(exports[0]['created_at'],first['created_at'])
+        self.assertIsNone(exports[0]['manifest']['volume_settings'])
+        self.assertNotEqual(exports[0]['id'],first['id'])
+
     def test_frozen_acceptance_contract_against_api(self):
         from exhibit import app
         from tests.api_client import TestClient

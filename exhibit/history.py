@@ -1,5 +1,5 @@
 """Immutable exports: publish one complete snapshot directory by atomic rename."""
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from hashlib import sha256
 from pathlib import Path
 from uuid import uuid4
@@ -59,7 +59,11 @@ def save_export(store, project, data):
             content['volume_settings']=mapping['settings']
             content['volume_files']=[{'path':'Submission/Volumes/'+v['file'],'pages':v['pages'],
                                       'sha256':sha256(archive.read('Submission/Volumes/'+v['file'])).hexdigest()} for v in mapping['volumes']]
-    meta = {'id': mid, 'created_at': datetime.now(timezone.utc).isoformat(), 'sha256': sha256(data).hexdigest(),
+    created=datetime.now(timezone.utc)
+    if previous:
+        last=datetime.fromisoformat(previous[0]['created_at'])
+        if created<=last:created=last+timedelta(microseconds=1)
+    meta = {'id': mid, 'created_at': created.isoformat(), 'sha256': sha256(data).hexdigest(),
             'size': len(data), 'manifest': content, 'changes': compare(previous[0]['manifest'] if previous else {}, content)}
     staging = parent / ('.pending-'+mid); staging.mkdir()
     # Incomplete staging directories are never visible in history.

@@ -186,6 +186,9 @@ def main():
             # Second CI job downloads archives produced on the other native systems.
             if len(sys.argv)>2:
                 incoming=Path(sys.argv[2])
+                for profile_file in incoming.rglob('volume-profile.json'):
+                    raw=profile_file.read_bytes();imported=request('/api/profiles/import',raw=raw)
+                    assert imported==json.loads(raw)
                 for source_archive in incoming.rglob('*project.zip'):
                     raw=source_archive.read_bytes();check=request('/api/backups/preview',raw=raw)
                     restored=request(f"/api/backups/{check['token']}/restore",{'copy':check['conflict']})
@@ -240,6 +243,7 @@ def main():
             after={str(p.relative_to(data)):p.read_bytes() for p in data.rglob('project.json')};assert before==after
             assert request(f'/api/projects/{pid}/exports/{first_export}')==package
             assert (folder/'LICENSE').is_file() and (folder/'THIRD-PARTY-NOTICES/PYTHON-LICENSE.txt').is_file()
+            assert (folder/'PDF-VOLUMES.md').is_file()
             print(json.dumps({'bundle':archive.name,'platform':sys.platform,'version':health['version'],'checks':['isolated start','static UI and optional Word pane assets','panel presence protocol (simulated Word host)','duplicate start','demo DOCX/PDF','PDFium rendering','structured extraction','PDF ZIP export','ready PDF upload and batch byte preservation','DOCX revisions without panel','immutable ZIP history','graceful stop','relocation and project persistence','licenses'],'result':'passed'}))
         except BaseException:
             # Helpers have their own request wrappers; retain the server traceback

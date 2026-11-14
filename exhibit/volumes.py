@@ -81,6 +81,9 @@ def build(items,config,stop=lambda:False,progress=lambda *args:None):
         root=reader.trailer['/Root'];form=root.get('/AcroForm');form=form.get_object() if form else {}
         widgets=sum(1 for p in reader.pages for a in p.get('/Annots',[]) if a.get_object().get('/Subtype')=='/Widget')
         names=root.get('/Names');names=names.get_object() if names else {}
+        if reader.get_fields() and (form.get('/CO') or names.get('/JavaScript') or any(f.get('/AA') for f in reader.get_fields().values())
+            or any(a.get_object().get('/AA') for page in reader.pages for a in page.get('/Annots',[]))):
+            raise ValueError('Форма с вычислениями или сценариями не может быть безопасно объединена: '+item['title']+'. Используйте отдельный исходный PDF.')
         if root.get('/Perms') or form.get('/XFA') or root.get('/Collection') or names.get('/EmbeddedFiles') or widgets and not reader.get_fields():
             raise ValueError('Нельзя безопасно перенести ограничения подписи, XFA, вложения или несвязанные поля в PDF-том: '+item['title']+'. Исходник сохранён; используйте отдельный PDF.')
         item['pages']=len(reader.pages)
@@ -112,9 +115,12 @@ def build(items,config,stop=lambda:False,progress=lambda *args:None):
                 first=len(writer.pages);reader=PdfReader(BytesIO(item['data']));readers.append(reader)
                 volume_pages.namespace(reader,'m'+item['id']+'.')
                 before_widgets=sum(1 for p in reader.pages for a in p.get('/Annots',[]) if a.get_object().get('/Subtype')=='/Widget')
+                before_annotations=sum(len(p.get('/Annots',[])) for p in reader.pages)
                 writer.append(reader,import_outline=True)
                 after_widgets=sum(1 for p in writer.pages[first:] for a in p.get('/Annots',[]) if a.get_object().get('/Subtype')=='/Widget')
                 if before_widgets!=after_widgets:raise ValueError('Не удалось сохранить поля PDF: '+item['title'])
+                if before_annotations!=sum(len(p.get('/Annots',[])) for p in writer.pages[first:]):
+                    raise ValueError('Не удалось сохранить все аннотации PDF: '+item['title']+'. Используйте отдельный исходный PDF.')
                 writer.add_outline_item((item['identifier']+' · '+item['title']).strip(' ·'),first)
                 page_owners.extend([item]*item['pages'])
                 for n,source in enumerate(item['source_map']):
