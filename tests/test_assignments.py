@@ -83,6 +83,20 @@ class Assignments(TestCase):
         self.assertEqual(p['documents'][0]['filename'],'Manual kept.pdf')
         self.assertEqual(p['documents'][1]['filename'],'Annex 1.pdf')
 
+    def test_history_capacity_refuses_without_making_project_unreadable(self):
+        self.p=volume_settings.save(self.s,self.p,{**deepcopy(volume_settings.DEFAULT),'enabled':False})
+        main=self.p['main']['sha256'];pid=self.p['id']
+        self.p['assignment_operations']=[{'id':f'{n:032x}','created_at':'2026-01-01T00:00:00+00:00',
+            'backup':f'backups/before-assignments-{pid}-{n:032x}.zip','changed_ids':[self.ids[0]],
+            'original_main':main,'derived_main':main,'word_pending':False} for n in range(2000)]
+        self.s.save(self.p);file=self.s.folder(pid)/'project.json';before=file.read_bytes()
+        inputs={path.name:path.read_bytes() for path in (self.s.folder(pid)/'inputs').iterdir()}
+        req=self.request();_,_,report=assignments.plan(self.s,pid,req)
+        with self.assertRaisesRegex(ValueError,'2000'):assignments.apply(self.s,pid,req,report['token'])
+        self.assertEqual(file.read_bytes(),before);self.assertEqual(len(self.s.load(pid)['assignment_operations']),2000)
+        self.assertEqual(inputs,{path.name:path.read_bytes() for path in (self.s.folder(pid)/'inputs').iterdir()})
+        self.assertEqual(history.read_export(self.s,self.p,history.list_exports(self.s,self.p)[0]['id']),self.oldzip)
+
     def test_mixed_typography_locator_and_unrelated_url_survive(self):
         parts=word.package(self.s.source(self.p,self.p['main']));root=word.xml(parts[word.FOOT])
         para=root.find("w:footnote[@w:id='1']/w:p",word.NS);para[:]=[]

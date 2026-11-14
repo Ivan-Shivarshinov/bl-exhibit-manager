@@ -230,6 +230,7 @@ def apply(store,pid,request,token):
         if token!=report['token']:raise ValueError('Подача или DOCX изменились. Повторите проверку назначений.')
         if report['conflicts']:raise ValueError('Назначения не применены: '+report['conflicts'][0]['message'])
         if not report['changes']:raise ValueError('Новых назначений нет.')
+        if len(p['assignment_operations'])>=2000:raise ValueError('Достигнут предел истории: 2000 изменений назначений. Новые изменения не применены; подача и прежние комплекты сохранены.')
         original=store.load(pid)
         from .schema import upgrade
         upgraded=upgrade(store,original,target=4,persist=False)
@@ -249,7 +250,7 @@ def apply(store,pid,request,token):
             receipt={'id':uuid4().hex,'created_at':datetime.now(timezone.utc).isoformat(),'backup':backup_name,
                      'changed_ids':[v['id'] for v in report['changes']], 'original_main':(original.get('main') or {}).get('sha256'),
                      'derived_main':(p.get('main') or {}).get('sha256'),'word_pending':report['word_pending']}
-            p['assignment_operations'].append(receipt);store.save(p)
+            p['assignment_operations'].append(receipt);validate_project(p);store.save(p)
             return p
         except BaseException:
             if new_blob and new_blob.resolve().parent==(store.folder(pid)/'inputs').resolve():new_blob.unlink(missing_ok=True)

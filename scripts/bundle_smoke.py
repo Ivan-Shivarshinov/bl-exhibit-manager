@@ -186,9 +186,7 @@ def main():
             # Second CI job downloads archives produced on the other native systems.
             if len(sys.argv)>2:
                 incoming=Path(sys.argv[2])
-                for profile_file in incoming.rglob('volume-profile.json'):
-                    raw=profile_file.read_bytes();imported=request('/api/profiles/import',raw=raw)
-                    assert imported==json.loads(raw)
+                assert request('/api/profiles')==[]
                 for source_archive in incoming.rglob('*project.zip'):
                     raw=source_archive.read_bytes();check=request('/api/backups/preview',raw=raw)
                     restored=request(f"/api/backups/{check['token']}/restore",{'copy':check['conflict']})
@@ -203,6 +201,10 @@ def main():
                         assert len(preview['volumes'])>=1
                         with ZipFile(BytesIO(fresh)) as z:assert 'Submission/Volumes/Volume map.json' in z.namelist()
                     print('BACKUP_EXCHANGE_OK='+str(source_archive))
+                assert request('/api/profiles')==[] # Restored bindings work without populating the global catalog.
+                for profile_file in incoming.rglob('volume-profile.json'):
+                    raw=profile_file.read_bytes();imported=request('/api/profiles/import',raw=raw)
+                    assert imported==json.loads(raw)
             else:
                 from verify_ready_pdf import verify_api
                 ready_output=Path('output/native-ready-qa')/target
