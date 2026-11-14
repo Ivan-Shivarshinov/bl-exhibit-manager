@@ -47,7 +47,7 @@ export default function Volumes({p,api,onSaved,onDirty,onWorking,saveBlob,disabl
   const blocked=disabled||working;
   return <section className="volume-section" aria-labelledby="volumes-heading" aria-busy={working}>
     <h2 id="volumes-heading">PDF-тома</h2>
-    <p className="muted">Необязательно: приложения с перечнем, общей нумерацией и переходами. Отдельные исходные PDF останутся в комплекте. Подпись исходного файла не удостоверяет новый том.</p>
+    <p className="muted">Необязательно: приложения с перечнем, общей нумерацией и переходами. Отдельные приложения останутся в комплекте. Подпись исходного файла не удостоверяет новый том.</p>
     <label><input type="checkbox" aria-label="Включить PDF-тома" checked={draft.enabled} disabled={blocked} onChange={e=>change({enabled:e.target.checked})}/> Включить PDF-тома</label>
     {draft.enabled&&<>
       <div className="volume-settings">

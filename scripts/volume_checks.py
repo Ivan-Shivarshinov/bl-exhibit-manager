@@ -42,6 +42,8 @@ def verify(request,data,outgoing):
     p=request(route+'/assignments/apply',{'request':assignment,'token':planned['token']})
     assert [d['identifier'] for d in p['documents']]==['Annex 2','Annex 1']
     request(route+'/references/confirm',{})
+    index={'enabled':True,'language':'ru','title':'Synthetic exhibits','formats':['pdf','docx'],'columns':['pages','path'],'order':'identifier'}
+    p=request(route+'/submission-index',index,method='PATCH');assert p['schema']==4
     config=request(route)['volume_settings'];config.update(enabled=True,max_pages=4)
     request(route+'/volumes/settings',config)
     profile=request('/api/profiles',{'project_id':pid,'name':'Frozen portable profile','naming':'identifier','folder':'','prefix':''})
@@ -53,6 +55,7 @@ def verify(request,data,outgoing):
     package,preview=export(request,route)
     with ZipFile(BytesIO(package)) as z:
         mapping=json.loads(z.read('Submission/Volumes/Volume map.json'))
+        assert 'Submission/Exhibit index.docx' in z.namelist() and 'Submission/Exhibit index.pdf' in z.namelist()
         assert len(mapping['pages'])==4 and len(mapping['volumes'])==2
         for meta in mapping['volumes']:
             assert sha256(z.read('Submission/Volumes/'+meta['file'])).hexdigest()==meta['sha256']

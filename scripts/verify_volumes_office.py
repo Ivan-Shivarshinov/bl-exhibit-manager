@@ -70,6 +70,13 @@ def main():
                 subprocess.run(['node','scripts/volumes_main_ui.cjs'],cwd=ROOT,env={**env,'EXHIBIT_BROWSER_ENTRY':entry,
                     'VOLUME_QA_URL':f'http://127.0.0.1:{port}','VOLUME_QA_PID':p['id'],'VOLUME_QA_OUTPUT':str(out)},check=True,timeout=180)
             finally:proc.terminate();proc.wait(timeout=20)
+            with ZipFile(out/'UI-main-volumes.zip') as z:
+                ui_main=PdfReader(BytesIO(z.read('Submission/Main document.pdf')))
+                targets=[a.get_object()['/A'] for page in ui_main.pages for a in page.get('/Annots',[]) if a.get_object().get('/A',{}).get('/S')=='/GoToR']
+                assert sorted(int(a['/D'][0]) for a in targets)==[0,0,0]
+                assert json.loads(z.read('Submission/Volumes/Volume map.json'))['settings']==s.load(p['id'])['volume_settings']
+            assert s.source(p,original_meta)==original and s.load(other['id'])==other_before
+            assert history.read_export(s,p,eid)==oldzip
             report={'passed':True,'converter':{k:v for k,v in engine.items() if k!='executable'},'source_sha256':sha256(original).hexdigest(),
                 'volumes':len(plan['volumes']),'main_exact_targets':[0,0,1],'original_other_submission_old_zip_unchanged':True,
                 'real_Word':'not tested','viewer_clicks':'separate CI job'}
