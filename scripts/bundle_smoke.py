@@ -193,7 +193,12 @@ def main():
                         for name in z.namelist():
                             if name.startswith(('inputs/','exports/','translation-')):
                                 assert (data/restored['id']/name).read_bytes()==z.read(name),name
-                    assert all(r.get('keep_original') for r in restored['references'])
+                    assert all(r.get('keep_original') or r.get('target') for r in restored['references'])
+                    if restored.get('volume_settings',{}).get('enabled'):
+                        from volume_checks import export as volume_export
+                        fresh,preview=volume_export(request,'/api/projects/'+restored['id'])
+                        assert len(preview['volumes'])>=1
+                        with ZipFile(BytesIO(fresh)) as z:assert 'Submission/Volumes/Volume map.json' in z.namelist()
                     print('BACKUP_EXCHANGE_OK='+str(source_archive))
             else:
                 from verify_ready_pdf import verify_api
@@ -207,6 +212,9 @@ def main():
             library_verify(request,data,outgoing,Path(sys.argv[2]) if len(sys.argv)>2 else Path('output/legacy-archives'))
             from submission_index_checks import verify as index_verify
             index_pid=index_verify(request,data,outgoing,source,Path(sys.argv[2]) if len(sys.argv)>2 else None)
+            if len(sys.argv)==2:
+                from volume_checks import verify as volume_verify
+                volume_verify(request,data,outgoing)
             # Native builds already measure this exact package. The exchange host
             # deliberately has no source/build dependencies: exercise only its EXE/app.
             if len(sys.argv)==2:load_check(request,data,outgoing)

@@ -305,7 +305,7 @@ def wrap(p, start, end, rid, bold_span=None):
         link.append(child)
 
 
-def add_links(data, references, paths):
+def add_links(data, references, paths, reference_paths=None):
     parts = package(data)
     root, rows = paragraphs(parts)
     if not any(not r.get('keep_original') for r in references):
@@ -319,7 +319,7 @@ def add_links(data, references, paths):
         for ref in sorted((r for r in refs if not r.get('keep_original')), key=lambda r: citations.bounds(r)[0], reverse=True):
             if text_of(p)[ref["start"]:ref["end"]] != ref["mention"]:
                 raise ValueError("Текст сноски изменился. Повторите сопоставление.")
-            target = quote(paths[ref["target"]], safe="/")
+            target = quote((reference_paths or {}).get(ref['key'],paths[ref["target"]]), safe="/")
             rid = existing.get(target)
             if not rid:
                 i = 1
