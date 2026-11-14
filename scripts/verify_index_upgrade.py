@@ -10,6 +10,7 @@ from urllib.request import Request,urlopen,urlretrieve
 from zipfile import ZipFile
 from pypdf import PdfWriter
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
+from exhibit import __version__
 
 
 @contextmanager
@@ -39,8 +40,14 @@ def running(archive,root,data,slot):
             with urlopen(base+'/api/health',timeout=5) as response: version=json.load(response)['version']
             if version=='0.5.1': authorization={'X-Exhibit-Local':'1'} # Explicit, hash-verified legacy package under test only.
             else:
-                from exhibit.local_access import owner_headers
-                authorization=owner_headers(base,data)
+                from exhibit import local_access
+                if version=='0.6.0':
+                    # Only the hash-verified released fixture uses its older
+                    # version in HMAC verification. No signature/owner check is bypassed.
+                    from unittest.mock import patch
+                    with patch.object(local_access,'__version__','0.6.0'):
+                        authorization=local_access.owner_headers(base,data)
+                else:authorization=local_access.owner_headers(base,data)
         payload=json.dumps(body).encode() if body is not None else raw
         req=Request(f'http://127.0.0.1:{port}'+path,data=payload,method=method,headers={**authorization,'Content-Type':'application/json'})
         try:
@@ -59,7 +66,7 @@ def running(archive,root,data,slot):
 
 def main():
     parser=argparse.ArgumentParser();parser.add_argument('package');parser.add_argument('--output',required=True);args=parser.parse_args()
-    package=Path(args.package).resolve();target=package.stem.split('-0.6.0-')[-1]
+    package=Path(args.package).resolve();target=package.stem.split('-'+__version__+'-')[-1]
     out=Path(args.output).resolve();out.mkdir(parents=True,exist_ok=True)
     with TemporaryDirectory(prefix='bl-index-upgrade-') as tmp:
         root=Path(tmp);data=root/'data';old=root/f'BLExhibitManager-0.5.1-{target}.zip'
@@ -78,7 +85,7 @@ def main():
             request(route+'/documents/'+p['documents'][0]['id'],{'designation':'Annex','number':12})
             original=request(route+'/export',{});eid=request(route+'/exports')[0]['id']
         with running(package,root,data,'new') as request:
-            assert request('/api/health')['version']=='0.6.0'
+            assert request('/api/health')['version']==__version__
             before=(data/pid/'project.json').read_bytes()
             assert request(route)['schema']==1 and (data/pid/'project.json').read_bytes()==before
             config={'enabled':True,'language':'en','title':'My exhibits','formats':['docx','pdf'],'columns':['pages','path'],'order':'identifier'}
@@ -94,7 +101,7 @@ def main():
             check=request('/api/backups/preview',raw=recovery)
             copy=request('/api/backups/'+check['token']+'/restore',{'copy':True});assert copy['schema']==1
             assert request('/api/projects/'+copy['id']+'/exports/'+eid)==original
-        (out/'upgrade-report.json').write_text(json.dumps({'target':target,'oldVersion':'0.5.1','newVersion':'0.6.0',
+        (out/'upgrade-report.json').write_text(json.dumps({'target':target,'oldVersion':'0.5.1','newVersion':__version__,
             'oldPackageSha256':expected,'openingDidNotMigrate':True,'migrationAndExport':True,'oldRefusesWithoutWriting':True,'recoveryInOldApp':True},indent=2),'utf-8')
 
 

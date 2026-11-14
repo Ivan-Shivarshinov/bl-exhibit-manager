@@ -82,6 +82,7 @@ def main():
         stop=stage/'Stop.command';stop.write_text('#!/bin/sh\ncd "$(dirname "$0")" || exit 1\nexec ./BLExhibitManager.app/Contents/MacOS/BLExhibitManager --stop\n','utf-8');stop.chmod(0o755)
     for name in ('LICENSE','NOTICE'):shutil.copyfile(ROOT/name,stage/name)
     shutil.copyfile(ROOT/'docs/PILOT.md',stage/'READ-ME-FIRST.md')
+    shutil.copyfile(ROOT/'docs/PDF-VOLUMES.md',stage/'PDF-VOLUMES.md')
     notices(stage/'THIRD-PARTY-NOTICES')
     commit=subprocess.check_output(['git','rev-parse','HEAD'],text=True,cwd=ROOT).strip()
     (stage/'build-info.json').write_text(json.dumps({'version':__version__,'target':target,'commit':commit,'python':platform.python_version()},indent=2),'utf-8')

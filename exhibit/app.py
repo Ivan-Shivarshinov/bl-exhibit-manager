@@ -146,6 +146,8 @@ def stop_application(background: BackgroundTasks):
         with app.state.material_jobs.lock:
             if app.state.material_jobs.active:
                 raise ValueError('Дождитесь операции библиотеки или отмените её перед остановкой приложения.')
+    if hasattr(store,'volume_jobs') and store.volume_jobs.active:
+        raise ValueError('Дождитесь сборки PDF-томов или отмените её перед остановкой.')
     background.add_task(stop)
     return {"stopping": True}
 
@@ -473,13 +475,17 @@ async def export(pid: str, request: Request):
     raw = await request.body()
     body = await request.json() if raw else {}
     if not isinstance(body,dict): raise ValueError('Некорректные параметры сборки.')
+    if type(body.get('without_volumes',False)) is not bool:raise ValueError('Некорректный режим экспорта.')
     with LOCK:
         p = store.load(pid)
     def build():
         from .index_settings import settings
-        if settings(p)['enabled']: return store.export(p,body.get('preview_token'))
+        from .volume_settings import settings as volume_settings
+        use_volumes=not body.get('without_volumes',False)
+        if use_volumes and volume_settings(p)['enabled']:return store.export(p,body.get('preview_token'))
+        if settings(p)['enabled']: return store.export(p,body.get('preview_token'),include_volumes=False)
         # Preserve serialization of the existing export path when the index is off.
-        with LOCK: return store.export(store.load(pid),body.get('preview_token'))
+        with LOCK: return store.export(store.load(pid),body.get('preview_token'),include_volumes=False)
     data = await run_in_threadpool(build)
     return Response(data, media_type="application/zip",
                     headers={"Content-Disposition": 'attachment; filename="Submission.zip"'})
@@ -489,6 +495,141 @@ async def export(pid: str, request: Request):
 def get_index_settings(pid: str):
     from .index_settings import settings
     with LOCK: return settings(store.load(pid))
+
+
+@app.get('/api/profiles')
+def profile_catalog():
+    from .submission_profiles import Profiles
+    with LOCK:return Profiles(store).list()
+
+
+@app.post('/api/profiles')
+async def create_profile(request:Request):
+    from .submission_profiles import Profiles,capture
+    body=await request.json()
+    if not isinstance(body,dict) or set(body)-{'name','project_id','profile_id','naming','folder','prefix'}:
+        raise ValueError('Некорректные поля создания профиля.')
+    with LOCK:
+        p=store.load(body.get('project_id'))
+        rules=capture(p,body.get('naming','keep'),body.get('folder'),body.get('prefix'))
+        return Profiles(store).create(body.get('name'),rules,body.get('profile_id'))
+
+
+@app.post('/api/profiles/import')
+async def import_profile(request:Request):
+    from .submission_profiles import Profiles,MAX_BYTES
+    raw=bytearray()
+    async for block in request.stream():
+        raw.extend(block)
+        if len(raw)>MAX_BYTES:raise ValueError('Профиль превышает 1 МБ.')
+    with LOCK:return Profiles(store).import_package(bytes(raw))
+
+
+@app.get('/api/profiles/{profile_id}')
+def get_profile(profile_id:str):
+    from .submission_profiles import Profiles
+    with LOCK:return Profiles(store).read(profile_id)
+
+
+@app.get('/api/profiles/{profile_id}/export')
+def export_profile(profile_id:str):
+    from .submission_profiles import Profiles
+    import json
+    with LOCK:data=Profiles(store).read(profile_id)
+    return Response(json.dumps(data,ensure_ascii=False,indent=2).encode('utf-8'),media_type='application/json',headers={'Content-Disposition':'attachment; filename="Exhibit-profile.json"'})
+
+
+@app.post('/api/projects/{pid}/profile/{action}')
+async def apply_profile(pid:str,action:str,request:Request):
+    from .submission_profiles import Profiles
+    body=await request.json()
+    if not isinstance(body,dict) or action not in ('preview','apply'):raise ValueError('Некорректное действие профиля.')
+    args=(pid,body.get('profile_id'),body.get('version_id'),body.get('options'))
+    with LOCK:
+        service=Profiles(store)
+        if action=='preview':return service.preview(*args)[1]
+        return store.public(service.apply(*args,body.get('token')))
+
+
+@app.post('/api/projects/{pid}/assignments/{action}')
+async def change_assignments(pid:str,action:str,request:Request):
+    from . import assignments
+    body=await request.json()
+    if not isinstance(body,dict) or action not in ('preview','apply'):raise ValueError('Некорректное действие назначений.')
+    def work():
+        with LOCK:
+            if action=='preview':return assignments.plan(store,pid,body.get('request'))[2]
+            return store.public(assignments.apply(store,pid,body.get('request'),body.get('token')))
+    return await run_in_threadpool(work)
+
+
+@app.post('/api/projects/{pid}/volumes/settings')
+async def save_volume_settings(pid:str,request:Request):
+    from .volume_settings import save
+    body=await request.json()
+    with LOCK:return store.public(save(store,store.load(pid),body))
+
+
+@app.get('/api/projects/{pid}/volumes/status')
+def volume_status(pid:str):
+    from .volume_jobs import manager
+    from .submission_index import fingerprint
+    service=manager(store)
+    with LOCK:current=fingerprint(store.load(pid))
+    with service.lock:plan=service.plans.get(pid)
+    job=service.by_project.get(pid)
+    if job and job not in service.memory and not (service.states/(job+'.json')).is_file():job=None
+    return {'fingerprint':current,'preview':service.public(plan) if plan and plan['token']==current else None,
+            'job':service.status(job) if job else None}
+
+
+@app.post('/api/projects/{pid}/volumes/{action}')
+async def start_volumes(pid:str,action:str,request:Request):
+    from .volume_jobs import manager
+    body=await request.json()
+    if not isinstance(body,dict):raise ValueError('Некорректное задание PDF-томов.')
+    return manager(store).start(pid,action,body.get('preview_token'))
+
+
+@app.get('/api/volume-jobs/{token}')
+def volume_job_status(token:str):
+    from .volume_jobs import manager
+    return manager(store).status(token)
+
+
+@app.post('/api/volume-jobs/{token}/cancel')
+def cancel_volume_job(token:str):
+    from .volume_jobs import manager
+    return manager(store).cancel(token)
+
+
+@app.get('/api/volume-jobs/{token}/download')
+def download_volumes(token:str,background:BackgroundTasks):
+    from .volume_jobs import manager
+    service=manager(store);path=service.download(token)
+    background.add_task(service.release,token)
+    return FileResponse(path,media_type='application/zip',filename='Submission.zip',background=background)
+
+
+@app.get('/api/projects/{pid}/volumes/{token}/{index}/image')
+def volume_image(pid:str,token:str,index:int,page:int=1):
+    from .volume_jobs import manager
+    data=manager(store).read_volume(pid,token,index)
+    return Response(pdf.render_png(data,page),media_type='image/png')
+
+
+@app.get('/api/projects/{pid}/volumes/{token}/{index}/pdf')
+def volume_pdf(pid:str,token:str,index:int):
+    from .volume_jobs import manager
+    return Response(manager(store).read_volume(pid,token,index),media_type='application/pdf')
+
+
+@app.get('/api/projects/{pid}/volumes/{token}/{index}/navigation')
+def volume_navigation(pid:str,token:str,index:int,page:int=1):
+    from .volume_jobs import manager
+    from .volume_pages import navigation
+    service=manager(store);plan=service.plan(pid,token);data=service.read_volume(pid,token,index)
+    return navigation(data,page,[v['file'] for v in plan['mapping']['volumes']],index)
 
 
 @app.patch('/api/projects/{pid}/submission-index')
