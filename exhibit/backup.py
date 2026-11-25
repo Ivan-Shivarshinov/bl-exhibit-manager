@@ -16,6 +16,7 @@ import time
 import unicodedata
 
 from .project import LOCK
+from .material_text import OCR_MEMBER, OCR_LIMIT, check_record
 
 FORMAT = 1
 MAX_BYTES = 8_000_000_000
@@ -25,7 +26,7 @@ MAX_INPUT = 50_000_000
 CHUNK = 1024 * 1024
 ID = r'[a-f0-9]{32}'
 BLOB = r'[a-f0-9]{64}\.(?:pdf|docx)'
-MEMBER = re.compile(rf'project.json|inputs/{BLOB}|translation-(?:source-)?{ID}\.json|exports/{ID}/(?:manifest.json|Submission.zip)')
+MEMBER = re.compile(rf'project\.json|inputs/{BLOB}|translation-(?:source-)?{ID}\.json|exports/{ID}/(?:manifest\.json|Submission\.zip)|{OCR_MEMBER}')
 
 
 def fail(message):
@@ -136,6 +137,7 @@ def check_project(p, files, read):
     except (KeyError, TypeError, AttributeError, IndexError) as exc:
         raise ValueError('Неполные или некорректные настройки проекта в архиве.') from exc
     histories = set()
+    ocr_sources = {blob.split('.')[0]: meta['pages'] for (blob, _), meta in pdf_info.items()}
     for name, entry in files.items():
         if name.startswith('inputs/') and name.split('/')[1].split('.')[0] != entry['sha256']:
             fail('Контрольная сумма исходника не совпадает с именем.')
@@ -153,6 +155,17 @@ def check_project(p, files, read):
                 fail('Неполные данные черновика перевода.')
         if name.startswith('exports/'):
             histories.add(name.split('/')[1])
+        if match := re.fullmatch(OCR_MEMBER, name):
+            source_hash, page_number = match.groups()
+            source_name = f'inputs/{source_hash}.pdf'
+            if p['schema'] < 5 or source_name not in files or entry['size'] > OCR_LIMIT:
+                fail('В архиве OCR отсутствует проверяемый исходник или используется неподдерживаемый формат.')
+            if source_hash not in ocr_sources:
+                from .pdf import inspect_pdf
+                ocr_sources[source_hash] = inspect_pdf(read(source_name), allow_forms=True)['pages']
+            if int(page_number) > ocr_sources[source_hash]:
+                fail('Распознанная страница отсутствует в исходном PDF.')
+            check_record(json_data(read(name)), source_hash, int(page_number))
     for eid in histories:
         meta_name, zip_name = f'exports/{eid}/manifest.json', f'exports/{eid}/Submission.zip'
         if meta_name not in files or zip_name not in files: fail('История комплектов неполна.')

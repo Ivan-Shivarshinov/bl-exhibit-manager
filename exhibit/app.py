@@ -8,7 +8,7 @@ from fastapi.responses import JSONResponse, Response, FileResponse, RedirectResp
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from .project import Store, LOCK
-from . import pdf
+from . import material_text, pdf
 from .translation import Translations
 from .translation_cli import status as translation_status
 from . import __version__
@@ -470,6 +470,46 @@ def result_pdf(pid: str, did: str):
         return Response(data, media_type="application/pdf", headers={"Content-Disposition": 'attachment; filename="Preview.pdf"'})
 
 
+@app.get('/api/text/ocr')
+def text_engine_status():
+    return material_text.engine_status()
+
+
+@app.post('/api/projects/{pid}/text-search')
+def text_search(pid: str, body: dict):
+    return material_text.search_project(store, pid, body.get('query'), body.get('part', 'all'),
+                                        body.get('match_case', False), body.get('offset', 0), body.get('snapshot'))
+
+
+@app.get('/api/projects/{pid}/documents/{did}/text-page')
+def text_page(pid: str, did: str, part: str, page: int, source: str):
+    return material_text.page_status(store, pid, did, part, page, source)
+
+
+@app.get('/api/projects/{pid}/documents/{did}/text-page/image')
+def text_page_image(pid: str, did: str, part: str, page: int, source: str):
+    return Response(material_text.page_image(store, pid, did, part, page, source), media_type='image/png')
+
+
+@app.post('/api/projects/{pid}/documents/{did}/text-page/ocr')
+def text_recognize(pid: str, did: str, body: dict):
+    return material_text.recognize(store, pid, did, body.get('part'), body.get('page'),
+                                   body.get('source'), body.get('language'))
+
+
+@app.post('/api/projects/{pid}/documents/{did}/text-page/confirm')
+def text_confirm(pid: str, did: str, body: dict):
+    return material_text.confirm(store, pid, did, body.get('part'), body.get('page'), body.get('source'),
+                                 body.get('revision'), body.get('lines'))
+
+
+@app.get('/api/projects/{pid}/documents/{did}/searchable-copy')
+def searchable_copy(pid: str, did: str, part: str, source: str):
+    from .searchable_pdf import make_copy
+    return Response(make_copy(store, pid, did, part, source), media_type='application/pdf',
+                    headers={'Content-Disposition': 'attachment; filename="Searchable.pdf"'})
+
+
 @app.post("/api/projects/{pid}/export")
 async def export(pid: str, request: Request):
     raw = await request.body()
@@ -886,7 +926,10 @@ def material_operation_cancel(token: str):
 
 
 @app.post('/api/library-files')
-async def library_file_upload(request: Request, name: str, archive: bool=False):
+async def library_file_upload(request: Request, name: str, archive: bool=False, relative_path: str | None = None):
+    from .library import checked_relative_path
+    if relative_path is not None:
+        relative_path = checked_relative_path(relative_path, name)
     lib,_=material_services();folder=lib.pending();size=0
     limit=backup.MAX_BYTES if archive else backup.MAX_INPUT
     path=folder/('library.zip' if archive else 'upload.pdf')
@@ -901,6 +944,8 @@ async def library_file_upload(request: Request, name: str, archive: bool=False):
         if not name.lower().endswith('.pdf'): raise ValueError('Выберите PDF.')
         # Receipt is temporary and role-free; publication checks each chosen role.
         part=await run_in_threadpool(lib.stage_part,folder,name,path.read_bytes(),allow_forms=True)
+        if relative_path is not None:
+            part['relative_path'] = relative_path
         from .library import atomic_json
         atomic_json(folder/'part.json',part)
         path.unlink()

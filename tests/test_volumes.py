@@ -187,7 +187,8 @@ class Volumes(unittest.TestCase):
             with self.assertRaises(ValueError):volume_settings.validate({**self.config(),'start':True})
             with self.assertRaises(ValueError):volume_settings.validate({**self.config(),'number_format':'{wrong}'})
             from exhibit.schema import check_version
-            with self.assertRaisesRegex(ValueError,'не поддерживается'):check_version(5)
+            from exhibit.schema import CURRENT
+            with self.assertRaisesRegex(ValueError,'не поддерживается'):check_version(CURRENT + 1)
             self.assertLess(old_schema,4)
 
     def test_signed_original_remains_unchanged_and_unsupported_forms_fail(self):

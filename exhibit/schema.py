@@ -2,7 +2,7 @@
 from copy import deepcopy
 from uuid import uuid4
 
-CURRENT = 4
+CURRENT = 5
 
 
 def provenance_schema(project):
@@ -27,7 +27,12 @@ def volume_schema(project):
     return project
 
 
-UPGRADES = {1: provenance_schema, 2: index_schema, 3: volume_schema}
+def text_schema(project):
+    project['schema'] = 5
+    return project
+
+
+UPGRADES = {1: provenance_schema, 2: index_schema, 3: volume_schema, 4: text_schema}
 
 
 def check_version(version):

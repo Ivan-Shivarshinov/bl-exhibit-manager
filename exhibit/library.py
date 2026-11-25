@@ -36,6 +36,13 @@ def clean_text(value, limit=250):
     return value.strip()
 
 
+def checked_relative_path(value, name):
+    if (not isinstance(value, str) or len(value) > 800 or any(ord(char) < 32 or char in '\\:' for char in value)
+            or any(part in ('', '.', '..') for part in value.split('/')) or value.split('/')[-1] != name):
+        raise ValueError('Недопустимый относительный путь входящего PDF.')
+    return value
+
+
 def metadata(value):
     out = {key: clean_text(value.get(key, '')) for key in FIELDS if key != 'tags'}
     if not out['title']: raise ValueError('Введите название материала.')
@@ -93,6 +100,8 @@ def check_version(v):
                 or not 0 < part['pages'] <= 1000 or len(part.get('sizes', [])) != part['pages']):
             raise ValueError('Повреждены сведения о части материала.')
         clean_text(part.get('name', ''))
+        if 'relative_path' in part:
+            checked_relative_path(part['relative_path'], part['name'])
     recipe = v.get('recipe', {})
     check_format(recipe.get('format', {}))
     if 'original' in parts: pdf.validate_selection(recipe.get('selection'), parts['original']['pages'])

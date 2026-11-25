@@ -1,4 +1,5 @@
 import MaterialLibrary from './MaterialLibrary';
+import MaterialText from './MaterialText';
 import Setup from './Setup';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
@@ -50,7 +51,8 @@ function App() {
   const [volumeDirty,setVolumeDirty]=useState(false),[volumeWorking,setVolumeWorking]=useState(false);
   const [profileWorking,setProfileWorking]=useState(false);
   const [assignmentDirty,setAssignmentDirty]=useState(false),[assignmentWorking,setAssignmentWorking]=useState(false);
-  const dirty = docDirty || styleDirty || indexDirty || volumeDirty || assignmentDirty;
+  const [textDirty,setTextDirty]=useState(false);
+  const dirty = docDirty || styleDirty || indexDirty || volumeDirty || assignmentDirty || textDirty;
   const [online, setOnline] = useState(null), [loaded, setLoaded] = useState(false), [retry, setRetry] = useState(0);
   const [creating, setCreating] = useState(false), [newName, setNewName] = useState('');
   const [translation, setTranslation] = useState(null);
@@ -125,7 +127,7 @@ function App() {
   return <>
     <div inert={Boolean(batch || creating || translation || backupOpen || setupOpen || libraryMode)}>
     <header><div className="brand">Buzko Legal <span>Приложения</span></div><div className="project-switch"><label htmlFor="project">Проект</label><select id="project" aria-label="Проект" value={p?.id || ''} disabled={disabled} onChange={e => run('Открываем…', async () => { accept(await api('/projects/'+e.target.value)); setSelected(null); setSearch(''); setTab('docs'); })}><option value="" disabled>Выберите подачу</option>{projects.map(x => <option key={x.id} value={x.id}>{x.name}</option>)}</select><button disabled={disabled} onClick={() => setCreating(true)}>Новая</button><button disabled={disabled} onClick={() => setBackupOpen(true)}>Архив проекта</button><button disabled={disabled} onClick={()=>setLibraryMode({mode:"browse",documentIds:[]})}>Библиотеки дел</button><button disabled={disabled} onClick={()=>setSetupOpen(true)}>Помощь и настройка</button></div><span className="local"><i/>{online === false ? 'Нет связи' : 'Локально'}</span></header>
-    <nav aria-label="Этапы подготовки">{[['docs','Документы'],['links','Ссылки в Word'],['word','Работа в Word'],['export','Проверка и экспорт']].map(([key, label]) => <button key={key} className={tab === key ? 'active' : ''} disabled={Boolean(busy)} onClick={() => guard(() => setTab(key))}>{label}{key==='export' && p?.issues.length ? <small>{p.issues.length}</small> : null}</button>)}<span className="save-state">{dirty ? 'Есть несохранённые настройки' : p ? 'Работа сохранена на компьютере' : 'Начало работы'}</span></nav>
+    <nav aria-label="Этапы подготовки">{[['docs','Документы'],...(p?[['text','Поиск по тексту']]:[]),['links','Ссылки в Word'],['word','Работа в Word'],['export','Проверка и экспорт']].map(([key, label]) => <button key={key} className={tab === key ? 'active' : ''} disabled={Boolean(busy)} onClick={() => guard(() => setTab(key))}>{label}{key==='export' && p?.issues.length ? <small>{p.issues.length}</small> : null}</button>)}<span className="save-state">{dirty ? 'Есть несохранённые изменения' : p ? 'Работа сохранена на компьютере' : 'Начало работы'}</span></nav>
     <div className={'message-strip ' + (error ? 'error' : '')} aria-live="polite">{busy || error || notice || 'PDF приложений и DOCX со сносками. Все исходники сохраняются отдельно.'}{error && !busy ? <button aria-label="Закрыть сообщение" onClick={() => setError('')}>×</button> : null}</div>
     {p?.schema_backup ? <p className="success-note">Перед обновлением формата сохранена резервная копия в папке данных: {p.schema_backup}</p> : null}
     {online === false ? <div className="connection-alert" role="alert"><b>Локальное приложение остановлено или недоступно.</b><p>Запустите Start.cmd на Windows или BLExhibitManager.app на macOS. Сохранённые проекты остаются на компьютере; эта страница автоматически восстановит связь.</p><button onClick={() => setRetry(r => r+1)}>Повторить подключение</button></div> : null}
@@ -142,6 +144,7 @@ function App() {
         </section>
         {active ? <><Preview key={active.id+'-preview'} p={p} doc={active} revision={revision} disabled={disabled} onSave={changes => mutate(`/documents/${active.id}`, changes)} onError={setError}/><Inspector key={active.id+'-inspector'} p={p} doc={active} busy={operationBusy} onDirty={setDirty} mutate={mutate} upload={upload} onFormat={()=>guard(()=>openBatch('format',[active.id]))} onTranslation={()=>guard(()=>setTranslation(active))}/></> : <div className="preview-empty"><p>Выберите документ для просмотра и оформления.</p></div>}
       </main> : null}
+      {tab === 'text' ? <MaterialText key={p.id} project={p} api={api} onDirty={setTextDirty} onProject={accept} saveBlob={saveBlob}/> : null}
       {tab === 'word' ? <WordWorkflow key={p.id} p={p} api={api} mutate={mutate} busy={operationBusy} onDirty={setDirty}/> : null}
       {tab === 'links' ? <Links error={error} clearError={()=>setError('')} p={p} busy={operationBusy} mutate={mutate} upload={upload} focusRef={focusRef}/> : null}
       {tab === 'export' ? <section className="export-page"><div><h1>Проверка перед сборкой</h1><p className="muted">В комплект войдут все загруженные приложения, в том числе не упомянутые в Word.</p></div>
