@@ -27,7 +27,7 @@ def source_text(data):
     for page_no, page in enumerate(PdfReader(BytesIO(data)).pages, 1):
         text = (page.extract_text() or "").strip()
         if not text or "\ufffd" in text or not any(c.isalpha() for c in text):
-            raise ValueError(f"На странице {page_no} нет надёжно извлекаемого текста. Для скана откройте «Поиск по тексту» и запустите распознавание страницы.")
+            raise ValueError(f"На странице {page_no} нет надёжно извлекаемого текста. Запустите OCR этой страницы в разделе «Поиск по тексту».")
         total += len(text)
         if total > MAX_TEXT:
             raise ValueError("Для одного перевода доступно до 120 000 знаков. Разделите исходный PDF или прикрепите готовый перевод.")
