@@ -2,6 +2,7 @@
 from pathlib import Path
 from threading import RLock
 import logging
+import json
 from urllib.parse import urlparse
 from fastapi import FastAPI, Request, BackgroundTasks
 from fastapi.responses import JSONResponse, Response, FileResponse, RedirectResponse
@@ -478,7 +479,31 @@ def text_engine_status():
 @app.post('/api/projects/{pid}/text-search')
 def text_search(pid: str, body: dict):
     return material_text.search_project(store, pid, body.get('query'), body.get('part', 'all'),
-                                        body.get('match_case', False), body.get('offset', 0), body.get('snapshot'))
+                                        body.get('match_case', False), body.get('offset', 0), body.get('snapshot'),
+                                        scope=body.get('scope', 'source'))
+
+
+@app.get('/api/projects/{pid}/text-docx')
+def text_docx(pid: str, source: str, location: str):
+    return material_text.word_location(store, pid, source, location)
+
+
+@app.get('/api/projects/{pid}/text-job')
+def latest_text_job(pid: str):
+    return material_services()[1].latest_text(pid)
+
+
+@app.post('/api/projects/{pid}/text-job')
+def start_text_job(pid: str, body: dict):
+    from .text_operations import checked_pages
+    action = body.get('action')
+    arguments = {'pid': pid}
+    if action == 'ocr_pages':
+        arguments.update({key: body.get(key) for key in ('did', 'part', 'source', 'pages', 'language')})
+        checked_pages(store, **arguments)
+    elif action != 'index_pages':
+        raise ValueError('Неизвестная операция работы с текстом.')
+    return material_services()[1].start(action, arguments, text_project=pid)
 
 
 @app.get('/api/projects/{pid}/documents/{did}/text-page')
@@ -487,8 +512,14 @@ def text_page(pid: str, did: str, part: str, page: int, source: str):
 
 
 @app.get('/api/projects/{pid}/documents/{did}/text-page/image')
-def text_page_image(pid: str, did: str, part: str, page: int, source: str):
-    return Response(material_text.page_image(store, pid, did, part, page, source), media_type='image/png')
+def text_page_image(pid: str, did: str, part: str, page: int, source: str, prepared: int | None = None, rect: str = 'null'):
+    if prepared is not None:
+        if len(rect) > 160:
+            raise ValueError('Некорректная область фрагмента.')
+        data = material_text.prepared_image(store, pid, did, part, page, source, prepared, json.loads(rect))
+    else:
+        data = material_text.page_image(store, pid, did, part, page, source)
+    return Response(data, media_type='image/png')
 
 
 @app.post('/api/projects/{pid}/documents/{did}/text-page/ocr')
@@ -508,6 +539,16 @@ def searchable_copy(pid: str, did: str, part: str, source: str):
     from .searchable_pdf import make_copy
     return Response(make_copy(store, pid, did, part, source), media_type='application/pdf',
                     headers={'Content-Disposition': 'attachment; filename="Searchable.pdf"'})
+
+
+@app.post('/api/projects/{pid}/pdf-derivatives')
+def pdf_derivative(pid: str, body: dict):
+    from .pdf_derivatives import make_derivative
+    operation = body.get('operation')
+    data = make_derivative(store, pid, operation, body.get('sources'), body.get('groups'), body.get('angle'))
+    kind = 'zip' if operation == 'split' else 'pdf'
+    return Response(data, media_type=f'application/{kind}',
+                    headers={'Content-Disposition': f'attachment; filename="Derived.{kind}"'})
 
 
 @app.post("/api/projects/{pid}/export")
@@ -879,6 +920,13 @@ async def create_library(request: Request):
 @app.get('/api/libraries/{lid}/materials')
 def library_catalog(lid: str, request: Request, q: str='', offset: int=0, limit: int=50, sort: str='title'):
     return material_services()[0].catalog(lid,q,offset,limit,sort,**{k:request.query_params.get(k) for k in ('category','language','document_date','tag','translation','hidden')})
+
+
+@app.post('/api/libraries/{lid}/text-search')
+def library_text_search(lid: str, body: dict):
+    return material_text.search_library(material_services()[0], lid, body.get('query'), body.get('match_case', False),
+                                        body.get('offset', 0), body.get('snapshot'), body.get('history', False),
+                                        body.get('hidden', False), body.get('tag', ''))
 
 
 @app.get('/api/libraries/{lid}/materials/{mid}/versions/{vid}')

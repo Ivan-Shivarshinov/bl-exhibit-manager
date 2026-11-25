@@ -10,7 +10,7 @@ from . import pdf
 def options_for(options, count):
     if options is None:
         options = {"selection": [{"page": n+1} for n in range(count)], "top": 60, "bottom": 60, "placement": "preserve", "notes": []}
-    if not isinstance(options, dict) or not {"selection", "top", "bottom"} <= set(options) or set(options)-{"selection", "top", "bottom", "placement", "notes"}:
+    if not isinstance(options, dict) or not {"selection", "top", "bottom"} <= set(options) or set(options)-{"selection", "top", "bottom", "placement", "notes", "prefer_ocr"}:
         raise ValueError("Укажите страницы/области и верхнюю/нижнюю исключаемую зону.")
     selection = options["selection"]
     if not isinstance(selection, list) or any(not isinstance(x, dict) or set(x)-{"page", "rect"} for x in selection):
@@ -36,17 +36,42 @@ def options_for(options, count):
                 raise ValueError("Укажите для каждой страницы высоту области сносок от 0 до 400 pt.")
             seen.add(note["page"])
         result.update(placement=options["placement"], notes=sorted(notes, key=lambda x:x["page"]))
+    if type(options.get('prefer_ocr', False)) is not bool:
+        raise ValueError('Некорректный выбор источника для перевода.')
+    if options.get('prefer_ocr'):
+        result['prefer_ocr'] = True
     return result
 
 
-def extract(data, options, limit=120_000):
+def extract(data, options, limit=120_000, reviewed=None):
     reader = PdfReader(BytesIO(data))
     options = options_for(options, len(reader.pages))
+    def confirmed(page):
+        record = reviewed(page) if reviewed and options.get('prefer_ocr') else None
+        return record if record and record['confirmed'] else None
     if options.get("placement") == "preserve":
         from .translation_layout import extract as extract_layout
-        return options, extract_layout(reader, options, limit)
+        return options, extract_layout(reader, options, limit, confirmed)
     parts, total = [], 0
     for region, item in enumerate(options["selection"], 1):
+        record = confirmed(item['page'])
+        if record:
+            from .translation_layout import ocr_characters, inside_text
+            w, h, chars = ocr_characters(reader.pages[item['page'] - 1], record)
+            rect = item.get('rect', [0, 0, 1, 1])
+            bounds = [rect[0]*w, max(rect[1]*h, options['top']), rect[2]*w, min(rect[3]*h, h-options['bottom'])]
+            if bounds[1] >= bounds[3]:
+                raise ValueError(f"Страница {item['page']}: исключаемые зоны перекрывают выбор.")
+            text = ''.join(segment for segment, _ in inside_text(chars, bounds, item['page'])).strip()
+            if not text:
+                raise ValueError(f"Страница {item['page']}: в выделенной области нет проверенных строк OCR.")
+            total += len(text)
+            if total > limit:
+                raise ValueError("Выбрано больше 120 000 знаков. Уменьшите выбор для перевода.")
+            for i in range(0, len(text), 6000):
+                parts.append({'page': item['page'], 'region': region, 'rect': rect, 'source': text[i:i+6000],
+                              'translation': '', 'ocr_revision': record['revision']})
+            continue
         # Flatten rotation and cropbox offset so coordinates match the rendered page.
         writer = PdfWriter()
         page = writer.add_page(reader.pages[item["page"]-1], excluded_keys=["/Annots", "/AA"])

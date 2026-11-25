@@ -3,6 +3,7 @@ import './material-library.css';
 import {Comparison,ProjectVersions} from './LibraryVersions';
 import LibraryArchive from './LibraryArchive';
 import LibraryUpload from './LibraryUpload';
+import LibraryTextSearch from './LibraryTextSearch';
 import LibraryUsage from './LibraryUsage';
 import LibraryDuplicates,{unresolvedDuplicates} from './LibraryDuplicates';
 
@@ -85,6 +86,7 @@ export default function MaterialLibrary({api,p,mode='browse',documentIds=[],onCh
     {busy&&<div className="library-progress" role="status"><p>{job?.message||'Проверяем…'} {job?.total?`${job.completed} из ${job.total}`:''}</p><progress {...(job?.total?{value:job.completed,max:job.total}:{})}/>{job?.id&&<button onClick={()=>api(`/material-operations/${job.id}/cancel`,{}).catch(e=>setError(e.message))}>Отменить операцию</button>}</div>}
     <LibraryArchive api={api} lid={lid} run={run} blocked={blocked} onRestored={async id=>{await refreshLibraries();setLid(id);setRevision(n=>n+1);}}/>
     {lid&&<LibraryUpload key={lid} api={api} lid={lid} run={run} blocked={blocked} onSaved={savedMatches} onView={viewMatch}/>}
+    {lid&&<LibraryTextSearch key={`text-${lid}`} api={api} lid={lid} disabled={blocked} onVersion={viewMatch}/>}
     {mode==='save'&&<section className="library-save"><h2>Материалы из подачи</h2><ul>{allSources.map(d=><li key={d.id}><label><input type="checkbox" disabled={blocked} checked={!excluded.includes(d.id)} onChange={e=>{setExcluded(e.target.checked?excluded.filter(id=>id!==d.id):[...excluded,d.id]);setPlan(null);}}/>Включить материал</label>{d.identifier} · {d.title} — {d.mode==='passthrough'?'готовый PDF без обработки':d.translation_confirmed?'оригинал и подтверждённый перевод':'оригинал; черновик перевода не переносится'}<details><summary>Реквизиты материала</summary>{['title','short_title','language','category','document_date','tags'].map(k=><label className="field" key={k}>{({title:'Название',short_title:'Краткое название',language:'Язык',category:'Категория',document_date:'Дата документа',tags:'Метки через запятую'})[k]}<input type={k==='document_date'?'date':'text'} value={metadataEdits[d.id]?.[k]??d[k]??''} onChange={e=>{setMetadataEdits({...metadataEdits,[d.id]:{...metadataEdits[d.id],[k]:e.target.value}});setPlan(null);}}/></label>)}</details></li>)}</ul>
       <label><input type="checkbox" checked={originalOnly} disabled={blocked} onChange={e=>{setOriginalOnly(e.target.checked);setPlan(null);}}/>Сохранить только оригинал, оставив черновик в подаче</label>
       <label><input type="checkbox" checked={asVersion} disabled={blocked||!selected||sourceDocs.length!==1} onChange={e=>{setAsVersion(e.target.checked);setPlan(null);}}/>Новая версия выбранного ниже материала {selected?.latest.metadata.title&&`«${selected.latest.metadata.title}»`}</label>

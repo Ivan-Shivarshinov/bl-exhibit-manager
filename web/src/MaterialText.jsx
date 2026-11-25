@@ -1,13 +1,15 @@
-import React, {useEffect, useRef, useState} from 'react';
+import React, {useCallback, useEffect, useRef, useState} from 'react';
 import {PrivateImage} from './PrivateResources';
+import TextJobs from './TextJobs';
 
-const partNames = {original: 'Оригинал', translation: 'Перевод'};
-const methods = {embedded: 'Текст PDF', ocr: 'OCR, ожидает сверки', 'confirmed-ocr': 'Проверенный OCR'};
+const partNames = {original: 'Оригинал', translation: 'Перевод', ready: 'Готовый PDF'};
+const methods = {embedded: 'Текст PDF', ocr: 'OCR, ожидает сверки', 'confirmed-ocr': 'Проверенный OCR', docx: 'Основной DOCX'};
 const languages = {eng: 'Английский', rus: 'Русский'};
 
 export default function MaterialText({project, api, onDirty, onProject, saveBlob}) {
   const [query, setQuery] = useState('');
   const [part, setPart] = useState('all');
+  const [scope, setScope] = useState('source');
   const [matchCase, setMatchCase] = useState(false);
   const [result, setResult] = useState(null);
   const [target, setTarget] = useState(null);
@@ -18,9 +20,15 @@ export default function MaterialText({project, api, onDirty, onProject, saveBlob
   const [error, setError] = useState('');
   const [edited, setEdited] = useState(false);
   const [notice, setNotice] = useState('');
+  const [volumeShown, setVolumeShown] = useState(false);
   const heading = useRef(null);
   const mounted = useRef(false);
   const base = `/projects/${project.id}`;
+  const onTextJobFinished = useCallback(async job => {
+    if (job.action !== 'ocr_pages') return;
+    const updated = await api(base);
+    if (mounted.current) onProject(updated);
+  }, [api, base, onProject]);
 
   useEffect(() => {
     mounted.current = true;
@@ -61,9 +69,26 @@ export default function MaterialText({project, api, onDirty, onProject, saveBlob
   }
 
   function open(page) {
+    if (page.part === 'main') {
+      const params = new URLSearchParams({source: page.source, location: page.location});
+      action('Открываем место в DOCX…', async () => {
+        const original = await api(`${base}/text-docx?${params}`);
+        setTarget({...page, ...original});
+        setStatus(null);
+      });
+      return;
+    }
     const params = new URLSearchParams({page: page.page, part: page.part, source: page.source});
     action('Открываем страницу…', async () => {
       const route = `${base}/documents/${page.document}/text-page`;
+      setVolumeShown(false);
+      if (page.prepared_page) {
+        params.set('prepared', page.prepared_page);
+        params.set('rect', JSON.stringify(page.rect));
+        setStatus(null);
+        setTarget({...page, image: `/api${route}/image?${params}`});
+        return;
+      }
       const response = await api(`${route}?${params}`);
       setStatus(response);
       setTarget({...page, route, image: `/api${route}/image?${params}`});
@@ -107,28 +132,27 @@ export default function MaterialText({project, api, onDirty, onProject, saveBlob
   const actionsLocked = Boolean(busy || edited);
   return <main className="export-page material-text">
     <h1>Поиск по тексту</h1>
-    <form className="material-text-search actions" onSubmit={event => {event.preventDefault(); if (!actionsLocked) search({query, part, match_case: matchCase});}}>
+    <form className="material-text-search actions" onSubmit={event => {event.preventDefault(); if (!actionsLocked) search({query, scope, part, match_case: matchCase});}}>
       <label>Слово или фраза<input type="search" required maxLength={160} value={query} onChange={event => setQuery(event.target.value)} placeholder={'Например, "срок поставки"'}/></label>
-      <label>Источник<select value={part} onChange={event => setPart(event.target.value)}><option value="all">Оригиналы и переводы</option><option value="original">Оригиналы</option><option value="translation">Переводы</option></select></label>
+      <label>Область<select aria-label="Область поиска" value={scope} onChange={event => setScope(event.target.value)}><option value="source">Исходные PDF</option><option value="prepared">Подготовленные страницы и фрагменты</option>{project.main && <option value="docx">Основной DOCX</option>}</select></label>
+      {scope !== 'docx' && <label>Источник<select value={part} onChange={event => setPart(event.target.value)}><option value="all">Оригиналы и переводы</option><option value="original">Оригиналы</option><option value="translation">Переводы</option></select></label>}
       <label className="checkline"><input type="checkbox" checked={matchCase} onChange={event => setMatchCase(event.target.checked)}/>Учитывать регистр</label>
-      <button className="primary" disabled={actionsLocked || !project.documents.length}>Найти</button>
+      <button className="primary" disabled={actionsLocked || (scope !== 'docx' && !project.documents.length)}>Найти</button>
     </form>
-    <p className="muted">Поиск по исходным PDF этой подачи. Фразу заключайте в кавычки.</p>
+    <p className="muted">Фразу заключайте в кавычки.</p>
     <div role="status">{busy || notice}</div>
     {error && <p role="alert" className="error-note">{error}</p>}
-    {result && <section aria-label="Результаты поиска">
-      <p>Проверено {result.checked} из {result.pages} стр. · найдено страниц: {result.hits.length}.</p>
-      {Boolean(result.without_text || result.unavailable || result.next_offset) && <p className="warning-note">{result.without_text ? `Страниц без доступного текста: ${result.without_text}. ` : ''}{result.unavailable ? `Страниц с ошибкой чтения: ${result.unavailable}. ` : ''}{result.next_offset ? 'Выдача пока неполная.' : ''}</p>}
-      {result.hits.length > 0 && <ul className="material-text-results">{result.hits.map(hit => <li key={`${hit.document}/${hit.part}/${hit.page}`}>
-        <button disabled={actionsLocked} onClick={() => open(hit)}>{hit.identifier ? `${hit.identifier} · ` : ''}{hit.title} · {partNames[hit.part]}, стр. {hit.page}</button>
-        <small>{methods[hit.method]}</small><p>{hit.context}</p>
-      </li>)}</ul>}
-      {result.next_offset !== null && <button disabled={actionsLocked} onClick={() => search(result.criteria, result)}>Продолжить поиск</button>}
-    </section>}
+    {result && <SearchResults result={result} disabled={actionsLocked} onOpen={open} onMore={() => search(result.criteria, result)}/>}
     {project.documents.length > 0 && <PagePicker key={project.id} documents={project.documents} disabled={actionsLocked} onOpen={open}/>}
+    {project.documents.length > 0 && <TextJobs project={project} api={api} engine={engine} disabled={actionsLocked} onFinished={onTextJobFinished}/>}
     {target && <section className="material-text-review" aria-labelledby="ocr-page-heading">
-      <h2 id="ocr-page-heading" tabIndex={-1} ref={heading}>{target.title} · {partNames[target.part]}, стр. {target.page}</h2>
-      <div className="material-text-columns">
+      <h2 id="ocr-page-heading" tabIndex={-1} ref={heading}>{hitLabel(target)}</h2>
+      {target.part === 'main' ? <DocxParagraph target={target}/>
+      : target.prepared_page ? <>
+        <PagePicture key={target.image} target={target}/>
+        {target.volume && <div className="actions"><button type="button" onClick={() => setVolumeShown(!volumeShown)}>{volumeShown ? 'Скрыть том' : `Открыть том ${target.volume.number}, стр. ${target.volume.page}`}</button></div>}
+        {volumeShown && <PrivateImage className="text-volume-preview" src={`/api${base}/volumes/${target.volume.token}/${target.volume.number - 1}/image?page=${target.volume.page}`} alt={`Том ${target.volume.number}, страница ${target.volume.page}`}/>}
+      </> : <div className="material-text-columns">
         <PagePicture key={target.image} target={target}/>
         <div>
           {status.record ? <Review key={status.record.revision} record={status.record} onDirty={setDirty} busy={Boolean(busy)} onSave={(revision, lines) => save('confirm', {revision, lines})}/>
@@ -142,9 +166,36 @@ export default function MaterialText({project, api, onDirty, onProject, saveBlob
               </div>}
           {status.record?.confirmed && <div className="actions"><button disabled={actionsLocked} onClick={downloadCopy}>Скачать PDF с поисковым слоем</button></div>}
         </div>
-      </div>
+      </div>}
     </section>}
   </main>;
+}
+
+function DocxParagraph({target}) {
+  const text = Array.from(target.text);
+  const [start, end] = target.span;
+  return <p className="text-source-paragraph">{text.slice(0, start).join('')}<mark>{text.slice(start, end).join('')}</mark>{text.slice(end).join('')}</p>;
+}
+
+export function hitLabel(hit) {
+  if (hit.part === 'main') return `${hit.title} · ${hit.label}`;
+  const identifier = hit.identifier ? `${hit.identifier} · ` : '';
+  const version = hit.version_number ? ` · версия ${hit.version_number}${hit.hidden ? ', скрытый материал' : ''}` : '';
+  const prepared = hit.prepared_page ? ` · подготовленная стр. ${hit.prepared_page}${hit.rect ? ' (фрагмент)' : ''}` : '';
+  return `${identifier}${hit.title}${version} · ${partNames[hit.part]}, стр. ${hit.page}${prepared}`;
+}
+
+export function SearchResults({result, disabled, onOpen, onMore}) {
+  const unit = result.criteria.scope === 'docx' ? 'абзацев' : 'стр.';
+  return <section aria-label="Результаты поиска">
+    <p>Проверено {result.checked} из {result.pages} {unit} · найдено: {result.hits.length}.</p>
+    {Boolean(result.without_text || result.unavailable || result.next_offset) && <p className="warning-note">{result.without_text ? `Страниц без доступного текста: ${result.without_text}. ` : ''}{result.unavailable ? `Страниц с ошибкой чтения: ${result.unavailable}. ` : ''}{result.next_offset ? 'Выдача пока неполная.' : ''}</p>}
+    {result.hits.length > 0 && <ul className="material-text-results">{result.hits.map(hit => <li key={JSON.stringify([hit.document, hit.version, hit.part, hit.prepared_page, hit.page, hit.location])}>
+      <button disabled={disabled} onClick={() => onOpen(hit)}>{hitLabel(hit)}</button>
+      <small>{methods[hit.method]}</small><p>{hit.context}</p>
+    </li>)}</ul>}
+    {result.next_offset !== null && <button disabled={disabled} onClick={onMore}>Продолжить поиск</button>}
+  </section>;
 }
 
 function SelectLanguage({language, onChange, engine, disabled}) {
@@ -174,7 +225,7 @@ function PagePicker({documents, disabled, onOpen}) {
   </details>;
 }
 
-function PagePicture({target}) {
+export function PagePicture({target}) {
   const [loaded, setLoaded] = useState(false);
   return <div className="material-text-picture">
     <PrivateImage src={target.image} alt={`${target.title}, страница ${target.page}`} onLoad={() => setLoaded(true)}/>

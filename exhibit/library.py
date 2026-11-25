@@ -17,6 +17,7 @@ from .backup import json_data, hash_stream, io_errors
 from .project import LOCK, digest, effective_format, identifier, safe_path, document_ready, check_format
 
 SCHEMA = 1
+MAX_OCR_SNAPSHOT_BYTES = 5_000_000
 ID = re.compile(r'[a-f0-9]{32}')
 HASH = re.compile(r'[a-f0-9]{64}')
 ROLES = {'original', 'translation', 'ready'}
@@ -41,6 +42,47 @@ def checked_relative_path(value, name):
             or any(part in ('', '.', '..') for part in value.split('/')) or value.split('/')[-1] != name):
         raise ValueError('Недопустимый относительный путь входящего PDF.')
     return value
+
+
+def ocr_size(value):
+    return len(json.dumps(value, ensure_ascii=False, separators=(',', ':')).encode('utf-8'))
+
+
+def check_ocr_snapshot(value, parts):
+    from .material_text import check_record
+    if not isinstance(value, dict) or set(value) - set(parts) or ocr_size(value) > MAX_OCR_SNAPSHOT_BYTES:
+        raise ValueError('Сохранённый OCR версии повреждён или слишком большой.')
+    for role, records in value.items():
+        part = parts[role]
+        if not isinstance(records, list) or len(records) > part['pages']:
+            raise ValueError('Некорректный список страниц OCR.')
+        seen = set()
+        for record in records:
+            page = record.get('page') if isinstance(record, dict) else None
+            if type(page) is not int or not 1 <= page <= part['pages'] or page in seen:
+                raise ValueError('Отсутствующая или повторная страница OCR.')
+            if not check_record(record, part['sha256'], page)['confirmed']:
+                raise ValueError('В библиотеку можно сохранить только проверенный текст OCR.')
+            seen.add(page)
+
+
+def checked_ocr(store, project, parts):
+    from .material_text import read_record
+    if project['schema'] < 5:
+        return {}
+    snapshot, size = {}, 0
+    for role, source in parts.items():
+        saved = []
+        for page in range(1, source['pages'] + 1):
+            record = read_record(store, project['id'], source['sha256'], page)
+            if record and record['confirmed']:
+                size += ocr_size(record)
+                if size > MAX_OCR_SNAPSHOT_BYTES:
+                    raise ValueError('Проверенный OCR материала превышает предел сохранения в библиотеку.')
+                saved.append(record)
+        if saved:
+            snapshot[role] = saved
+    return snapshot
 
 
 def metadata(value):
@@ -102,6 +144,8 @@ def check_version(v):
         clean_text(part.get('name', ''))
         if 'relative_path' in part:
             checked_relative_path(part['relative_path'], part['name'])
+    if 'ocr' in v:
+        check_ocr_snapshot(v['ocr'], parts)
     recipe = v.get('recipe', {})
     check_format(recipe.get('format', {}))
     if 'original' in parts: pdf.validate_selection(recipe.get('selection'), parts['original']['pages'])
@@ -294,7 +338,7 @@ class Library:
         self.check_rows(rows)
         with LOCK, io_errors():
             lib = self.load(lid); p = self.store.load(pid); folder = self.pending()
-            planned = []; errors = []; warnings = []; index=deepcopy(self.match_index(lib,cancel))
+            planned = []; errors = []; warnings = []; index=deepcopy(self.match_index(lib,cancel)); ocr_bytes = 0
             for row in rows:
                 if cancel(): raise ValueError('Операция отменена до публикации.')
                 progress(len(planned)+len(errors),len(rows),'Проверяем состав материалов')
@@ -322,6 +366,12 @@ class Library:
                          'created_at':datetime.now(timezone.utc).isoformat(),'comment':clean_text(row.get('comment',''),1000),
                          'metadata':meta,'parts':parts,'recipe':recipe,'translation_binding':binding(doc) if 'translation' in parts else None,
                          'ready_identifier':identifier(doc,p) if 'ready' in parts else None}
+                    if saved := checked_ocr(self.store, p, parts):
+                        size = ocr_size(saved)
+                        if ocr_bytes + size > 2 * MAX_OCR_SNAPSHOT_BYTES:
+                            raise ValueError('Слишком много текста OCR за одну операцию. Сохраните материалы частями.')
+                        v['ocr'] = saved
+                        ocr_bytes += size
                     check_version(v)
                     signature = digest({k:x['sha256'] for k,x in parts.items() if k != 'ready' or 'original' not in parts})
                     duplicates,related=self.matches(index,v)

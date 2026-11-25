@@ -107,7 +107,10 @@ class Translations:
                 saved = json.loads(saved_path.read_text("utf-8"))
                 if saved.get("hash") == d["original"]["sha256"]:
                     options = saved["options"]
-            options, parts = translation_source.extract(self.store.source(p, d["original"]), options, MAX_TEXT)
+            from .material_text import read_record
+            source_hash = d['original']['sha256']
+            options, parts = translation_source.extract(self.store.source(p, d["original"]), options, MAX_TEXT,
+                reviewed=lambda page: read_record(self.store, pid, source_hash, page))
             return {"hash": d["original"]["sha256"], "parts": parts, "options": options,
                     "token": digest({"hash": d["original"]["sha256"], "parts": parts, "options": options})}
 
@@ -146,7 +149,7 @@ class Translations:
                 raise ValueError("Другой перевод уже выполняется. Дождитесь завершения или отмените его.")
             source = self.source(pid, did, body.get("options"))
             if body.get("token") != source["token"]:
-                raise ValueError("Оригинал изменился. Обновите и проверьте извлечённый текст.")
+                raise ValueError("Оригинал или выбранный текст изменился. Обновите и проверьте текст перед отправкой.")
             old = self.state(pid, did)
             if old and body.get("revision") != old["revision"]:
                 raise ValueError("Черновик изменён в другом окне. Откройте перевод заново.")

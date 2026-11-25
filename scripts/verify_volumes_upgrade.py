@@ -1,4 +1,4 @@
-"""Released 0.6.0 -> frozen 0.7.0 -> guarded rollback, isolated data only."""
+"""Released 0.6.0 -> current frozen package -> guarded rollback in an isolated profile."""
 import argparse,json,sys,shutil
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -26,7 +26,7 @@ def main():
         with urlopen(base+old.name,timeout=60) as r,old.open('wb') as destination:shutil.copyfileobj(r,destination)
         assert sha256(old.read_bytes()).hexdigest()==expected
         source=make_pdf('Synthetic upgrade',[['Immutable legacy source']])
-        with running(old,root,data,'old-first') as request:
+        with running(old,root,data,'old-first',previous_version='0.6.0') as request:
             assert request('/api/health')['version']=='0.6.0'
             p=request('/api/projects',{'name':'Synthetic legacy 0.6'});pid=p['id'];route='/api/projects/'+pid
             p=request(route+'/upload?name=Annex12.pdf&mode=passthrough',raw=source)
@@ -46,7 +46,7 @@ def main():
             with ZipFile(BytesIO(result)) as z:assert z.read('Submission/Annex12.pdf')==source
             assert request(route+'/exports/'+eid)==oldzip
             after=(data/pid/'project.json').read_bytes()
-        with running(old,root,data,'old-rollback') as request:
+        with running(old,root,data,'old-rollback',previous_version='0.6.0') as request:
             assert 'Версия проекта' in request(route,expected=400)['detail']
             assert (data/pid/'project.json').read_bytes()==after
             check=request('/api/backups/preview',raw=recovery)

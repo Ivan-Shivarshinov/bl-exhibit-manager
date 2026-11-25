@@ -1,4 +1,4 @@
-"""Black-box 0.7 acceptance for the actual frozen application, not source imports."""
+"""Black-box volume acceptance for the frozen application."""
 from hashlib import sha256
 from io import BytesIO
 from pathlib import Path
@@ -68,6 +68,6 @@ def verify(request,data,outgoing):
     # Profile catalog is deliberately absent from project archives.
     with ZipFile(BytesIO(raw)) as z:
         assert not any('.submission-profiles' in n for n in z.namelist())
-    (outgoing/'volumes-result.json').write_text(json.dumps({'passed':True,'version':'0.7.0','volumes':len(preview['volumes']),
+    (outgoing/'volumes-result.json').write_text(json.dumps({'passed':True,'version':request('/api/health')['version'],'volumes':len(preview['volumes']),
        'checks':['frozen assignments','frozen profiles','exact sources','two volumes','immutable old ZIP','portable schema 4 archive']},indent=2),'utf-8')
     return pid

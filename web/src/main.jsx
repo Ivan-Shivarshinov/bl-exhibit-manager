@@ -1,5 +1,7 @@
 import MaterialLibrary from './MaterialLibrary';
 import MaterialText from './MaterialText';
+import PdfDerivatives from './PdfDerivatives';
+import {parsePages} from './pdfSelection';
 import Setup from './Setup';
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
@@ -140,6 +142,7 @@ function App() {
           <input className="search" type="search" aria-label="Поиск документов" placeholder="Поиск по документам, папкам, номерам…" value={search} onChange={e => setSearch(e.target.value)}/>
           <div className="batch-toolbar"><label className="select-visible"><input type="checkbox" aria-label="Выбрать видимые документы" disabled={disabled||!visibleDocs.length} checked={visibleDocs.length>0&&visibleDocs.every(d=>checked.includes(d.id))} onChange={e=>setChecked(e.target.checked?[...new Set([...checked,...visibleDocs.map(d=>d.id)])]:checked.filter(id=>!visibleDocs.some(d=>d.id===id)))}/>Выбрано: {checked.length}</label><select aria-label="Сортировка документов" value={sort} disabled={disabled} onChange={e=>setSort(e.target.value)}><option value="added">Порядок загрузки</option><option value="number">По номеру</option><option value="title">По названию</option></select><button disabled={disabled||!checked.length} onClick={()=>openBatch('organize')}>Номера и имена</button><button disabled={disabled} onClick={()=>openBatch('format')}>Оформление</button>{checked.length?<><button disabled={disabled} onClick={useReadyPdfs}>Использовать выбранные без обработки</button><small>В комплект войдут целые исходные PDF. Штампы и выбор страниц не применяются.</small><button disabled={disabled} onClick={()=>setChecked([])}>Снять выбор</button></>:null}{checked.some(id=>!visibleDocs.some(d=>d.id===id))?<small>Выбор включает документы вне текущего фильтра.</small>:null}</div>
           <div className="table-scroll"><table><thead><tr><th aria-label="Выбор"/><th>Номер</th><th>Документ</th><th>Папка</th><th>Статус</th></tr></thead><tbody>{visibleDocs.map(d => <tr key={d.id} className={active?.id === d.id ? 'selected' : ''}><td><input type="checkbox" aria-label={`Выбрать ${d.identifier||d.title}`} checked={checked.includes(d.id)} disabled={disabled} onChange={e=>setChecked(e.target.checked?[...checked,d.id]:checked.filter(id=>id!==d.id))}/></td><td><button className="row-button" disabled={Boolean(busy)} onClick={() => guard(() => setSelected(d.id))}>{d.identifier || '—'}</button></td><td><button className="title-button" disabled={Boolean(busy)} onClick={() => guard(() => setSelected(d.id))}>{d.title}</button><small>{d.translation ? 'Перевод прикреплён' : d.mode === 'passthrough' ? 'Без обработки' : 'Только оригинал'}</small></td><td>{d.folder || '—'}</td><td><span className={'status ' + (d.ready ? 'ready' : '')}>{d.mode === 'passthrough' ? 'Готовый PDF' : d.ready ? 'Проверено' : 'Проверить'}</span></td></tr>)}</tbody></table>{!p.documents.length ? <p className="muted inset">Добавьте один или несколько PDF.</p> : search && !p.documents.some(d => `${d.identifier} ${d.title} ${d.folder}`.toLowerCase().includes(search.toLowerCase())) ? <p className="muted inset">По этому запросу ничего не найдено. <button onClick={() => setSearch('')}>Сбросить поиск</button></p> : null}</div>
+          {p.documents.length > 0 && <PdfDerivatives key={p.id} project={p} api={api} disabled={disabled} saveBlob={saveBlob}/>}
           <div className="word-upload"><h2>Основной документ</h2><p>{p.main?.name || 'DOCX с существующими сносками'}</p><Upload accept=".docx" disabled={disabled} onFiles={f => upload(f, 'main')}>{p.main ? 'Заменить DOCX' : 'Загрузить DOCX'}</Upload><small>Необязателен для подготовки приложений.</small></div><footer>Всего документов: {p.documents.length}</footer>
         </section>
         {active ? <><Preview key={active.id+'-preview'} p={p} doc={active} revision={revision} disabled={disabled} onSave={changes => mutate(`/documents/${active.id}`, changes)} onError={setError}/><Inspector key={active.id+'-inspector'} p={p} doc={active} busy={operationBusy} onDirty={setDirty} mutate={mutate} upload={upload} onFormat={()=>guard(()=>openBatch('format',[active.id]))} onTranslation={()=>guard(()=>setTranslation(active))}/></> : <div className="preview-empty"><p>Выберите документ для просмотра и оформления.</p></div>}
@@ -194,17 +197,6 @@ function Inspector({p, doc, busy, onDirty, mutate, upload, onFormat, onTranslati
   </aside>;
 }
 
-function parsePages(value, count) {
-  const result=[];
-  for (const token of value.split(',').map(x=>x.trim())) {
-    const match = /^(\d+)(?:-(\d+))?$/.exec(token);
-    if (!match) throw new Error('Укажите страницы, например 1, 3-5.');
-    const a=Number(match[1]), b=Number(match[2] || match[1]);
-    if (a<1 || b<a || b>count) throw new Error('Диапазон страниц вне документа.');
-    for(let n=a;n<=b;n++) result.push({page:n});
-  }
-  return result;
-}
 function Preview({p, doc, revision, disabled, onSave, onError}) {
   const [part, setPart] = useState('original'), [page, setPage] = useState(1), [imageUrl, setImageUrl] = useState('');
   const [imageError, setImageError] = useState(''), [loading,setLoading]=useState(false), [drawing,setDrawing]=useState(false), [zoom,setZoom]=useState('fit');

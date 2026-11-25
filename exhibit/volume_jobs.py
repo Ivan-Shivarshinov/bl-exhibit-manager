@@ -158,6 +158,14 @@ class VolumeJobs:
                 'volumes':plan['mapping']['volumes'],'page_map':plan['mapping']['pages'],
                 'references':plan['references'],'issues':plan['issues']}
 
+    def search_map(self, pid, token):
+        with self.lock:
+            plan = self.plans.get(pid)
+            if not plan or plan['token'] != token or plan['issues']:
+                return {}
+            return {(row['document_id'], row['part'], row['source_sha256'], row['prepared_page']): row
+                    for row in plan['mapping']['pages']}
+
     def plan(self,pid,token):
         with self.lock:plan=self.plans.get(pid)
         if not plan or token!=plan['token']:raise ValueError(STALE)

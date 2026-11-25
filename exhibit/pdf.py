@@ -95,7 +95,7 @@ def inspect_pdf(data: bytes, *, allow_forms=False):
         raise ValueError("Не удалось прочитать PDF. Проверьте формат и целостность файла.") from exc
 
 
-def render_png(data: bytes, page_number: int, scale=1.2):
+def render_png(data: bytes, page_number: int, scale=1.2, rect=None):
     with PDF_LOCK, pdfium.PdfDocument(data) as pdf:
         if not pdf.init_forms():
             # Orphan widgets can have appearances even without a catalog AcroForm.
@@ -108,7 +108,13 @@ def render_png(data: bytes, page_number: int, scale=1.2):
         if not 1 <= page_number <= len(pdf):
             raise ValueError("Страница вне документа.")
         page = pdf[page_number - 1]
-        bitmap = page.render(scale=raster_scale(*page.get_size(), scale), limit_image_cache=True, draw_annots=True)
+        width, height = page.get_size()
+        crop = (0, 0, 0, 0)
+        if rect is not None:
+            left, top, right, bottom = rect
+            crop = (left * width, (1 - bottom) * height, (1 - right) * width, top * height)
+        bitmap = page.render(scale=raster_scale(width, height, scale), crop=crop,
+                             limit_image_cache=True, draw_annots=True)
         try:
             result = BytesIO()
             bitmap.to_pil().save(result, format="PNG")

@@ -1,6 +1,8 @@
 from io import BytesIO
 from pathlib import Path
 from tempfile import TemporaryDirectory
+from threading import Event
+from time import monotonic, sleep
 from unittest import TestCase
 from unittest.mock import patch
 
@@ -12,7 +14,13 @@ from reportlab.pdfgen import canvas
 
 from exhibit import backup, material_text, pdf, schema, searchable_pdf
 from exhibit.project import Store
-from exhibit.samples import make_pdf
+from exhibit.samples import main_docx, make_pdf
+from exhibit.library import Library
+from exhibit.volume_jobs import manager
+from exhibit import volume_settings
+from exhibit.material_jobs import Jobs
+from exhibit.text_index import open_index
+from exhibit.translation import Translations
 from tests.pdf_forms import form_pdf
 
 
@@ -142,8 +150,84 @@ class MaterialTextTests(TestCase):
             second = material_text.search_project(self.store, self.pid, 'поставки', offset=1, snapshot=first['snapshot'])
             self.assertEqual((second['without_text'], second['next_offset']), (1, None))
             self.store.upload(self.store.load(self.pid), 'Another.pdf', mixed_pdf(), mode='passthrough')
-            with self.assertRaisesRegex(ValueError, 'Состав подачи изменился'):
+            with self.assertRaisesRegex(ValueError, 'Запустите поиск заново'):
                 material_text.search_project(self.store, self.pid, 'поставки', offset=1, snapshot=first['snapshot'])
+
+    def test_docx_locations_are_exact_and_bound_to_source(self):
+        self.store.upload(self.store.load(self.pid), 'Main.docx', main_docx(), kind='main')
+        docx = material_text.search_project(self.store, self.pid, '"Позиция учебной стороны"', scope='docx')['hits'][0]
+        self.assertRegex(docx['label'], '^Абзац')
+        note = material_text.search_project(self.store, self.pid, '"намеренно отсутствует"', scope='docx')['hits'][0]
+        self.assertRegex(note['label'], '^Сноска')
+        result = material_text.word_location(self.store, self.pid, note['source'], note['location'])
+        self.assertEqual(result['text'][slice(*note['span'])], 'намеренно отсутствует')
+        with self.assertRaisesRegex(ValueError, 'DOCX изменился'):
+            material_text.word_location(self.store, self.pid, '0' * 64, note['location'])
+
+    def test_prepared_fragment_filters_text_and_gates_volume_map(self):
+        p = self.store.load(self.pid)
+        self.store.update(p, self.did, {'mode': 'prepare', 'number': 1, 'selection': [{'page': 1, 'rect': [.07,.14,.64,.2]}]})
+        self.store.approve(p, self.did, 'document')
+        p = volume_settings.save(self.store, p, {**volume_settings.DEFAULT, 'enabled': True})
+        self.assertEqual(material_text.search_project(self.store, self.pid, 'Fictional', scope='prepared')['hits'], [])
+        hit, = material_text.search_project(self.store, self.pid, '"срок поставки"', scope='prepared')['hits']
+        self.assertNotIn('Fictional', hit['context'])
+        self.assertNotIn('volume', hit)
+        service = manager(self.store)
+        self.addCleanup(service.close)
+        service.preview(self.pid)
+        hit, = material_text.search_project(self.store, self.pid, 'поставки', scope='prepared')['hits']
+        self.assertIn('volume', hit)
+        self.assertTrue(service.read_volume(self.pid, hit['volume']['token'], hit['volume']['number'] - 1))
+        image = material_text.prepared_image(self.store, self.pid, self.did, 'original', 1, self.source, 1, hit['rect'])
+        with Image.open(BytesIO(image)) as picture:
+            self.assertGreater(picture.width, picture.height * 2)
+            left, top, right, bottom = material_text.union(hit['boxes'])
+            area = picture.crop((int(left*picture.width), int(top*picture.height), int(right*picture.width), int(bottom*picture.height)))
+            self.assertLess(area.convert('L').getextrema()[0], 128)
+        self.store.update(self.store.load(self.pid), self.did, {'title': 'New title'})
+        self.assertNotIn('volume', material_text.search_project(self.store, self.pid, 'поставки', scope='prepared')['hits'][0])
+
+    def test_library_search_filters_versions_visibility_and_metadata(self):
+        library = Library(self.store)
+        lid = library.create('Учебное дело')['id']
+        plan = library.save_preview(lid, self.pid, [{'document_id': self.did, 'metadata': {'tags': ['first']}}])
+        first, = library.publish(plan['token'])['materials']
+        self.store.upload(self.store.load(self.pid), 'Current.pdf', make_pdf('Current', [['Соглашение изменилось.']]), did=self.did)
+        plan = library.save_preview(lid, self.pid, [{'document_id': self.did, 'material_id': first['material_id']}])
+        library.publish(plan['token'])
+        self.assertFalse(material_text.search_library(library, lid, 'поставки')['hits'])
+        hit, = material_text.search_library(library, lid, 'поставки', history=True, tag='first')['hits']
+        self.assertEqual(hit['version'], first['version_id'])
+        self.assertTrue(library.preview_page(lid, hit['document'], hit['version'], hit['part'], hit['page']))
+        library.hide(lid, hit['document'], True, library.load(lid)['revision'])
+        self.assertFalse(material_text.search_library(library, lid, 'поставки', history=True)['hits'])
+        self.assertTrue(material_text.search_library(library, lid, 'поставки', history=True, hidden=True)['hits'][0]['hidden'])
+
+    def test_library_version_carries_only_confirmed_ocr_through_an_archive(self):
+        library = Library(self.store)
+        lid = library.create('Архив учебного дела')['id']
+        with (patch.object(material_text, 'executable', return_value='test-engine'),
+              patch.object(material_text, 'engine_languages', return_value=['eng']),
+              patch.object(material_text, 'run_engine', return_value=fake_tsv())):
+            draft = self.recognize()
+        plan = library.save_preview(lid, self.pid, [{'document_id': self.did}])
+        first, = library.publish(plan['token'])['materials']
+        self.assertFalse(material_text.search_library(library, lid, 'shipment')['hits'])
+        material_text.confirm(self.store, self.pid, self.did, 'original', 2, self.source, draft['revision'], ['Verified library phrase'])
+        plan = library.save_preview(lid, self.pid, [{'document_id': self.did, 'material_id': first['material_id'], 'allow_duplicate': True}])
+        latest, = library.publish(plan['token'])['materials']
+        archive = library.archive_save(lid)
+        restored_library = Library(Store(Path(self.temp.name) / 'new-profile'))
+        incoming = restored_library.pending()
+        (incoming / 'library.zip').write_bytes((library.pending(archive['token']) / 'library.zip').read_bytes())
+        other_token = incoming.name
+        restored_library.archive_preview(other_token)
+        restored_library.archive_restore(other_token)
+        with patch.object(material_text, 'executable', return_value=None):
+            hit, = material_text.search_library(restored_library, lid, '"verified library"', history=True)['hits']
+        self.assertEqual((hit['version'], hit['part'], hit['page'], hit['method']),
+                         (latest['version_id'], 'ready', 2, 'confirmed-ocr'))
 
     def test_searchable_copy_preserves_rendered_pages_and_rejects_forms_signatures(self):
         with self.assertRaisesRegex(ValueError, 'Сначала распознайте'):
@@ -170,3 +254,85 @@ class MaterialTextTests(TestCase):
             with self.assertRaisesRegex(ValueError, 'формами или подписью'):
                 searchable_pdf.make_copy(self.store, project['id'], doc['id'], 'original', doc['original']['sha256'])
             self.assertEqual(self.store.source(project, doc['original']), data)
+
+    def test_reviewed_ocr_translation_is_explicit_sliced_and_bound_to_review(self):
+        p = self.store.load(self.pid)
+        self.store.update(p, self.did, {'mode': 'prepare', 'number': 8})
+        self.store.upload(p, 'Translation.pdf', make_pdf('Attached', [['Existing translation']]), kind='translation', did=self.did)
+        attached = p['documents'][0]['translation']
+        with (patch.object(material_text, 'executable', return_value='test-engine'),
+              patch.object(material_text, 'engine_languages', return_value=['eng']),
+              patch.object(material_text, 'run_engine', return_value=fake_tsv())):
+            draft = self.recognize()
+        options = {'selection': [{'page': 2, 'rect': [0, 0, .5, .2]}], 'top': 0, 'bottom': 0,
+                   'placement': 'preserve', 'notes': [], 'prefer_ocr': True}
+        provider = Translations(self.store)
+        with self.assertRaisesRegex(ValueError, 'надёжно извлекаемого'):
+            provider.source(self.pid, self.did, options)
+        reviewed = material_text.confirm(self.store, self.pid, self.did, 'original', 2, self.source,
+                                        draft['revision'], ['Verified shipment'])
+        with self.assertRaisesRegex(ValueError, 'надёжно извлекаемого'):
+            provider.source(self.pid, self.did, {**options, 'prefer_ocr': False})
+        for placement in ('preserve', 'exclude'):
+            result = provider.source(self.pid, self.did, {**options, 'placement': placement})
+            part, = result['parts']
+            self.assertEqual((part['source'], part['ocr_revision']), ('Verified shipment', reviewed['revision']))
+        with self.assertRaisesRegex(ValueError, 'граница зоны пересекает текст'):
+            provider.source(self.pid, self.did, {**options, 'selection':[{'page':2, 'rect':[0,0,.2,.2]}]})
+        material_text.confirm(self.store, self.pid, self.did, 'original', 2, self.source, reviewed['revision'], ['Updated shipment'])
+        with self.assertRaisesRegex(ValueError, 'текст изменился'):
+            provider.start(self.pid, self.did, {'target':'Русский', 'provider':'codex', 'reviewed_source':True,
+                                               'options':result['options'], 'token':result['token']})
+        self.assertIsNone(provider.state(self.pid, self.did))
+        self.assertEqual(self.store.load(self.pid)['documents'][0]['translation'], attached)
+
+    def wait_job(self, service, token):
+        deadline = monotonic() + 10
+        while monotonic() < deadline:
+            status = service.status(token)
+            if status['state'] not in ('running', 'queued'):
+                return status
+            sleep(.025)
+        self.fail('Text job did not finish')
+
+    def test_index_reuses_pages_across_instances_and_can_be_cancelled(self):
+        service = Jobs(Library(self.store))
+        first = service.start('index_pages', {'pid':self.pid}, text_project=self.pid)['id']
+        self.assertEqual(self.wait_job(service, first)['result']['reused'], 0)
+        with open_index(self.store.root) as index:
+            self.assertIn('Срок поставки', index.get(self.source, 1))
+            self.assertEqual(index.get(self.source, 2), '')
+        another = Jobs(Library(self.store))
+        self.assertEqual(another.latest_text(self.pid)['id'], first)
+        second = another.start('index_pages', {'pid':self.pid}, text_project=self.pid)['id']
+        self.assertEqual(self.wait_job(another, second)['result']['reused'], 2)
+
+    def test_ocr_queue_cancellation_preserves_checkpoint_and_restart_marks_interrupted(self):
+        from exhibit.library import atomic_json
+        service = Jobs(Library(self.store))
+        args = {'pid':self.pid,'did':self.did,'part':'original','source':self.source,'pages':[1,2],'language':'eng'}
+        entered = Event()
+        def cancelled_engine(*args, cancel, **kwargs):
+            entered.set()
+            deadline = monotonic() + 8
+            while not cancel() and monotonic() < deadline:
+                sleep(.005)
+            raise ValueError('Остановлено')
+        with (patch.object(material_text,'executable',return_value='ocr'),
+              patch.object(material_text,'engine_languages',return_value=['eng']),
+              patch.object(material_text,'run_engine',side_effect=cancelled_engine)):
+            token = service.start('ocr_pages', args, text_project=self.pid)['id']
+            self.assertTrue(entered.wait(8))
+            service.cancel(token)
+            state = self.wait_job(service, token)
+        self.assertEqual((state['state'], state['result']['embedded'], state['result']['remaining']), ('cancelled',1,1))
+        atomic_json(service.root/(token+'.json'),{**state,'state':'running'})
+        restarted = Jobs(Library(self.store))
+        self.assertEqual(restarted.latest_text(self.pid)['state'], 'interrupted')
+        with (patch.object(material_text,'executable',return_value='ocr'),
+              patch.object(material_text,'engine_languages',return_value=['eng']),
+              patch.object(material_text,'run_engine',return_value=fake_tsv())):
+            token = restarted.start('ocr_pages', args, text_project=self.pid)['id']
+            self.assertEqual(self.wait_job(restarted, token)['result']['completed'], 2)
+            token = restarted.start('ocr_pages', args, text_project=self.pid)['id']
+            self.assertEqual(self.wait_job(restarted, token)['result']['reused'], 1)

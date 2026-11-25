@@ -187,6 +187,8 @@ def main():
             if len(sys.argv)>2:
                 incoming=Path(sys.argv[2])
                 assert request('/api/profiles')==[]
+                intake_archives = list(incoming.rglob('material-intake-project.zip'))
+                assert len(intake_archives) == 3, intake_archives
                 for source_archive in incoming.rglob('*project.zip'):
                     raw=source_archive.read_bytes();check=request('/api/backups/preview',raw=raw)
                     restored=request(f"/api/backups/{check['token']}/restore",{'copy':check['conflict']})
@@ -195,6 +197,11 @@ def main():
                             if name.startswith(('inputs/','exports/','translation-')):
                                 assert (data/restored['id']/name).read_bytes()==z.read(name),name
                     assert all(r.get('keep_original') or r.get('target') for r in restored['references'])
+                    if source_archive.name == 'material-intake-project.zip':
+                        hit, = request(f"/api/projects/{restored['id']}/text-search",
+                                       {'query': '"Corrected synthetic delivery date"'})['hits']
+                        assert (hit['page'], hit['method']) == (2, 'confirmed-ocr'), hit
+                        assert (data/restored['id']/f"ocr-{hit['source']}-{hit['page']}.json").is_file()
                     if restored.get('volume_settings',{}).get('enabled'):
                         from volume_checks import export as volume_export
                         fresh,preview=volume_export(request,'/api/projects/'+restored['id'])

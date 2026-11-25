@@ -14,14 +14,14 @@ from exhibit import __version__
 
 
 @contextmanager
-def running(archive,root,data,slot):
+def running(archive,root,data,slot,*,previous_version=None,extra_env=None):
     install=root/slot;install.mkdir()
     if sys.platform=='darwin':subprocess.run(['/usr/bin/ditto','-x','-k',str(archive),str(install)],check=True)
     else:
         with ZipFile(archive) as z:z.extractall(install)
     folder=next(install.iterdir());exe=folder/('BLExhibitManager.exe' if os.name=='nt' else 'BLExhibitManager.app/Contents/MacOS/BLExhibitManager')
     home=root/'profile';home.mkdir(exist_ok=True)
-    env={**os.environ,'EXHIBIT_DATA_DIR':str(data),'HOME':str(home),'USERPROFILE':str(home)}
+    env={**os.environ,**(extra_env or {}),'EXHIBIT_DATA_DIR':str(data),'HOME':str(home),'USERPROFILE':str(home)}
     if os.name=='nt':env.update(APPDATA=str(home/'AppData/Roaming'),LOCALAPPDATA=str(home/'AppData/Local'))
     for key in ('PYTHONHOME','PYTHONPATH','VIRTUAL_ENV','CONDA_PREFIX'):env.pop(key,None)
     env['PATH']=str(Path(os.environ['SYSTEMROOT'])/'System32') if os.name=='nt' else '/usr/bin:/bin'
@@ -41,11 +41,11 @@ def running(archive,root,data,slot):
             if version=='0.5.1': authorization={'X-Exhibit-Local':'1'} # Explicit, hash-verified legacy package under test only.
             else:
                 from exhibit import local_access
-                if version=='0.6.0':
+                if version==previous_version:
                     # Only the hash-verified released fixture uses its older
                     # version in HMAC verification. No signature/owner check is bypassed.
                     from unittest.mock import patch
-                    with patch.object(local_access,'__version__','0.6.0'):
+                    with patch.object(local_access,'__version__',previous_version):
                         authorization=local_access.owner_headers(base,data)
                 else:authorization=local_access.owner_headers(base,data)
         payload=json.dumps(body).encode() if body is not None else raw

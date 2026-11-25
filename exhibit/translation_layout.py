@@ -51,7 +51,7 @@ def inside_text(chars, box, page):
         if x0 <= l <= r <= x1 and y0 <= t <= b <= y1:
             admitted.append((pending+char, (l,t,r,b))); pending = ""
         elif l < x1 and r > x0 and t < y1 and b > y0:
-            raise ValueError(f"Страница {page}: граница зоны пересекает буквы. Передвиньте границу между строками.")
+            raise ValueError(f"Страница {page}: граница зоны пересекает текст. Передвиньте границу между строками.")
         elif admitted:
             pending = "\n"
     return admitted
@@ -70,13 +70,30 @@ def blocks(admitted):
     return result
 
 
-def extract(reader, options, limit):
+def ocr_characters(page, record):
+    w, h = float(page.cropbox.width), float(page.cropbox.height)
+    if page.rotation % 180:
+        w, h = h, w
+    values = []
+    for line in record['lines']:
+        if not line['text'].strip():
+            continue
+        l, t, r, b = line['box']
+        bounds = (l*w, t*h, r*w, b*h)
+        values.extend([('\n', bounds), (line['text'], bounds)])
+    return w, h, values
+
+
+def extract(reader, options, limit, confirmed=lambda page: None):
     parts, total, cache = [], 0, {}
     heights = {x["page"]:x["height"] for x in options.get("notes", [])}
     for region,item in enumerate(options["selection"],1):
         number = item["page"]
-        if number not in cache: cache[number] = characters(reader.pages[number-1])
-        w,h,chars = cache[number]
+        if number not in cache:
+            record = confirmed(number)
+            page = reader.pages[number - 1]
+            cache[number] = (ocr_characters(page, record) if record else characters(page), record)
+        (w,h,chars), record = cache[number]
         top,bottom,notes = options["top"],options["bottom"],heights.get(number,0)
         if top+bottom+notes >= h-40:
             raise ValueError(f"Страница {number}: зоны не оставляют места основному тексту.")
@@ -104,6 +121,8 @@ def extract(reader, options, limit):
                     region_parts.append({"page":number,"region":region,"rect":rect,"role":role,"group":group,
                         "layout":{"size":[w,h],"top":top,"bottom":bottom,"notes":notes,"bounds":bounds},
                         "source":chunk,"translation":""})
+                    if record:
+                        region_parts[-1]['ocr_revision'] = record['revision']
         if not region_parts or not any(c.isalpha() for p in region_parts for c in p["source"]):
             raise ValueError(f"Страница {number}, область {region}: нет надёжно извлекаемого текста. Для сканов нужен готовый перевод PDF.")
         parts.extend(region_parts)
