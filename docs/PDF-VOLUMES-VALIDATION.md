@@ -1,6 +1,6 @@
 # Проверка 0.7.0: профили, назначения и тома
 
-Работа по принятому N03–N08, OpenSpec `submission-pdf-volumes`. PR [#10](https://github.com/Ivan-Shivarshinov/bl-exhibit-manager/pull/10), ветка `codex/submission-pdf-volumes`, поверх выпущенной 0.6.0. **Кандидат 0.7.0 готов: согласованный объём, проверки и три пакета завершены. Восемь заданий CI успешны; старое отдельное задание просмотрщика 0.6.0 пропущено, новый просмотрщик 0.7.0 проверен. Публикация и merge не выполнялись.** Все примеры искусственные. Рабочий стол пользователя не используется.
+Работа по принятому N03–N08, OpenSpec `submission-pdf-volumes`. Ветка `codex/submission-pdf-volumes` основана на выпущенной 0.6.0. Восемь заданий CI успешны, включая проверку переходов в новых томах. Отдельное задание просмотрщика для 0.6.0 пропущено. Все примеры искусственные. **[v0.7.0](https://github.com/Ivan-Shivarshinov/bl-exhibit-manager/releases/tag/v0.7.0) опубликована 25 ноября из тега `7a40ef9`.** [PR #10](https://github.com/Ivan-Shivarshinov/bl-exhibit-manager/pull/10) остаётся открытым.
 
 OpenSpec: [34/34 задачи](../openspec/changes/archive/2026-11-14-submission-pdf-volumes/tasks.md). Все 14 новых требований перенесены в семь базовых спецификаций с сохранением прежних; изменение архивировано. Заключительная строгая валидация — 16/16 базовых спецификаций, без ошибок.
 
@@ -70,7 +70,7 @@ OpenSpec: [34/34 задачи](../openspec/changes/archive/2026-11-14-submission
 | `BLExhibitManager-0.7.0-macos-x64.zip` | 36 178 072 | `54ff28bd4c187b2cce304d7cd8623425e042502853d73a8c81dd28bf3b79d07f` |
 | `BLExhibitManager-0.7.0-macos-arm64.zip` | 34 264 619 | `0c7c4b5dbcaee72d99ab72d0c3fa1ad645f2fdfc5304a718ad00cedb9d603986` |
 
-Пакеты доступны также в артефактах указанного CI, не в GitHub Release. Малые искусственные свидетельства — `output/qa-v070`: `PACKAGE-PROVENANCE.json`, `native-{target}/`, `office-arm/`, `viewer-final/`, `crash-report.json`, `service-load-report.json`. Частных материалов в Git нет.
+Те же три пакета и `SHA256SUMS.txt` опубликованы в [GitHub Release](https://github.com/Ivan-Shivarshinov/bl-exhibit-manager/releases/tag/v0.7.0). Все четыре файла скачаны по публичным ссылкам без авторизации. Их SHA-256 совпали с локальными файлами. Малые искусственные свидетельства — `output/qa-v070`: `PACKAGE-PROVENANCE.json`, `native-{target}/`, `office-arm/`, `viewer-final/`, `crash-report.json`, `service-load-report.json`.
 
 ## Границы оставшихся ручных проверок
 
