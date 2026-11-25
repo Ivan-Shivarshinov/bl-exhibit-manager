@@ -111,7 +111,7 @@ def extract(data, options, limit=120_000, reviewed=None):
                 textpage.close(); rendered.close()
         text = "".join(chars).replace("\r\n", "\n").replace("\r", "\n").strip()
         if not text or "\ufffd" in text or not any(c.isalpha() for c in text):
-            raise ValueError(f"Страница {item['page']}, область {region}: нет надёжно извлекаемого текста. Измените область/зоны; для сканов нужен готовый перевод PDF.")
+            raise ValueError(f"Страница {item['page']}, область {region}: нет надёжно извлекаемого текста. Измените область или выберите проверенный OCR, сохранённый в «Поиске по тексту».")
         total += len(text)
         if total > limit:
             raise ValueError("Выбрано больше 120 000 знаков. Уменьшите выбор для перевода.")

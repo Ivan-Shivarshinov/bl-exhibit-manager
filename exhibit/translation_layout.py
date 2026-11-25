@@ -124,7 +124,7 @@ def extract(reader, options, limit, confirmed=lambda page: None):
                     if record:
                         region_parts[-1]['ocr_revision'] = record['revision']
         if not region_parts or not any(c.isalpha() for p in region_parts for c in p["source"]):
-            raise ValueError(f"Страница {number}, область {region}: нет надёжно извлекаемого текста. Для сканов нужен готовый перевод PDF.")
+            raise ValueError(f"Страница {number}, область {region}: нет надёжно извлекаемого текста. Для скана подтвердите текст в «Поиске по тексту» и выберите проверенный OCR для перевода.")
         parts.extend(region_parts)
     return parts
 
