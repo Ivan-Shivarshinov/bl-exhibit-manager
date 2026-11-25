@@ -96,7 +96,7 @@ def exercise(request, route, doc, russian_pdf):
                                       ('translation', 'translations', make_pdf('Synthetic', [[VOLUME_PHRASE]]))):
         upload = request('/api/library-files?' + urlencode({'name': 'Contract.pdf', 'relative_path': directory + '/Contract.pdf'}), raw=contents)
         assert upload['part']['relative_path'] == directory + '/Contract.pdf'
-        row = {'token': upload['token'], 'role': role}
+        row = {'token': upload['token'], 'role': role, 'metadata': {'title': 'Synthetic agreement'}}
         if role == 'translation':
             row.update(pair=pair[0]['token'], confirmed=True)
         pair.append(row)
