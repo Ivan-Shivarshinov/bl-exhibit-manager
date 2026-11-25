@@ -27,8 +27,10 @@ class BackupTests(TestCase):
         self.store.scan(self.p)
         Translations(self.store).write(self.p['id'], self.did, {'status':'partial','parts':[{'source':'Sample text','translation':''}],
             'source_hash': self.p['documents'][0]['original']['sha256'], 'target':'English'})
-        history.save_export(self.store, self.p, b'first immutable output')
-        history.save_export(self.store, self.p, b'second immutable output')
+        for text in ('first immutable output','second immutable output'):
+            output=BytesIO()
+            with ZipFile(output,'w',ZIP_DEFLATED) as package:package.writestr('Submission/Synthetic.txt',text)
+            history.save_export(self.store,self.p,output.getvalue())
         self.archive = self.root/'project.zip'
 
     def save(self):

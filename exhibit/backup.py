@@ -62,6 +62,13 @@ def check_project(p, files, read):
     check_version(p.get('schema'))
     from .index_settings import settings
     settings(p)
+    from .volume_settings import settings as volume_settings
+    volume_settings(p)
+    from .assignments import validate_project
+    validate_project(p)
+    if p.get('applied_profile') is not None:
+        from .submission_profiles import validate_version
+        validate_version(p['applied_profile'])
     if not re.fullmatch(ID, str(p.get('id', ''))) or not isinstance(p.get('name'), str) or not p['name'].strip():
         fail('Некорректное имя или идентификатор проекта.')
     if not isinstance(p.get('documents'), list) or not isinstance(p.get('references'), list) or not isinstance(p.get('style'), dict):
@@ -79,6 +86,10 @@ def check_project(p, files, read):
         if not entry or entry['sha256'] != value.get('sha256') or value['blob'].split('.')[0] != entry['sha256']:
             fail('В архиве отсутствует или повреждён обязательный исходник.')
     source(p.get('main'))
+    for item in p.get('assignment_sources', []):
+        source(item)
+        from .word import package
+        package(read('inputs/'+item['blob']))
     pdf_info = {}
     for doc in p['documents']:
         if doc.get('provenance') is not None:

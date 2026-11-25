@@ -186,6 +186,7 @@ def main():
             # Second CI job downloads archives produced on the other native systems.
             if len(sys.argv)>2:
                 incoming=Path(sys.argv[2])
+                assert request('/api/profiles')==[]
                 for source_archive in incoming.rglob('*project.zip'):
                     raw=source_archive.read_bytes();check=request('/api/backups/preview',raw=raw)
                     restored=request(f"/api/backups/{check['token']}/restore",{'copy':check['conflict']})
@@ -193,8 +194,17 @@ def main():
                         for name in z.namelist():
                             if name.startswith(('inputs/','exports/','translation-')):
                                 assert (data/restored['id']/name).read_bytes()==z.read(name),name
-                    assert all(r.get('keep_original') for r in restored['references'])
+                    assert all(r.get('keep_original') or r.get('target') for r in restored['references'])
+                    if restored.get('volume_settings',{}).get('enabled'):
+                        from volume_checks import export as volume_export
+                        fresh,preview=volume_export(request,'/api/projects/'+restored['id'])
+                        assert len(preview['volumes'])>=1
+                        with ZipFile(BytesIO(fresh)) as z:assert 'Submission/Volumes/Volume map.json' in z.namelist()
                     print('BACKUP_EXCHANGE_OK='+str(source_archive))
+                assert request('/api/profiles')==[] # Restored bindings work without populating the global catalog.
+                for profile_file in incoming.rglob('volume-profile.json'):
+                    raw=profile_file.read_bytes();imported=request('/api/profiles/import',raw=raw)
+                    assert imported==json.loads(raw)
             else:
                 from verify_ready_pdf import verify_api
                 ready_output=Path('output/native-ready-qa')/target
@@ -207,6 +217,9 @@ def main():
             library_verify(request,data,outgoing,Path(sys.argv[2]) if len(sys.argv)>2 else Path('output/legacy-archives'))
             from submission_index_checks import verify as index_verify
             index_pid=index_verify(request,data,outgoing,source,Path(sys.argv[2]) if len(sys.argv)>2 else None)
+            if len(sys.argv)==2:
+                from volume_checks import verify as volume_verify
+                volume_verify(request,data,outgoing)
             # Native builds already measure this exact package. The exchange host
             # deliberately has no source/build dependencies: exercise only its EXE/app.
             if len(sys.argv)==2:load_check(request,data,outgoing)
@@ -232,6 +245,7 @@ def main():
             after={str(p.relative_to(data)):p.read_bytes() for p in data.rglob('project.json')};assert before==after
             assert request(f'/api/projects/{pid}/exports/{first_export}')==package
             assert (folder/'LICENSE').is_file() and (folder/'THIRD-PARTY-NOTICES/PYTHON-LICENSE.txt').is_file()
+            assert (folder/'PDF-VOLUMES.md').is_file()
             print(json.dumps({'bundle':archive.name,'platform':sys.platform,'version':health['version'],'checks':['isolated start','static UI and optional Word pane assets','panel presence protocol (simulated Word host)','duplicate start','demo DOCX/PDF','PDFium rendering','structured extraction','PDF ZIP export','ready PDF upload and batch byte preservation','DOCX revisions without panel','immutable ZIP history','graceful stop','relocation and project persistence','licenses'],'result':'passed'}))
         except BaseException:
             # Helpers have their own request wrappers; retain the server traceback

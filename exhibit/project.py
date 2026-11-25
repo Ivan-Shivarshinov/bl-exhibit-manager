@@ -110,6 +110,13 @@ class Store:
         result = upgrade(self, p, target=p.get('schema'))
         from .index_settings import settings
         settings(result)
+        from .volume_settings import settings as volume_settings
+        volume_settings(result)
+        from .assignments import validate_project
+        validate_project(result)
+        if result.get('applied_profile') is not None:
+            from .submission_profiles import validate_version
+            validate_version(result['applied_profile'])
         return result
 
     def save(self, p):
@@ -541,7 +548,11 @@ class Store:
         if not status["ready"]: raise ValueError("Основной PDF ещё не подготовлен или устарел. Подготовьте его заново.")
         return (self.folder(p["id"]) / "main-pdf" / (status["key"]+".pdf")).read_bytes()
 
-    def export(self, p, preview_token=None):
+    def export(self, p, preview_token=None, include_volumes=True):
+        from .volume_settings import settings as volume_settings
+        if include_volumes and volume_settings(p)['enabled']:
+            from .volume_jobs import manager
+            return manager(self).export_bytes(p['id'],preview_token)
         from .index_settings import settings
         if settings(p)['enabled']:
             from .submission_index import manager
@@ -569,6 +580,8 @@ class Store:
         from .index_settings import settings
         from .submission_index import fingerprint
         result['submission_index_settings'] = settings(p)
+        from .volume_settings import settings as volume_settings
+        result['volume_settings'] = volume_settings(p)
         result['submission_index_fingerprint'] = fingerprint(p)
         for d in result["documents"]:
             d["identifier"] = identifier(d,p)

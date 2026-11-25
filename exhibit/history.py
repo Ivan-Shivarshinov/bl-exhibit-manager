@@ -1,5 +1,5 @@
 """Immutable exports: publish one complete snapshot directory by atomic rename."""
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from hashlib import sha256
 from pathlib import Path
 from uuid import uuid4
@@ -15,7 +15,11 @@ def manifest(store, project):
     from .project import identifier, revision, digest
     from .index_settings import settings
     config = settings(project)
+    profile=project.get('applied_profile')
     return {'submission_index': config if config['enabled'] else None, 'main': (project.get('main') or {}).get('sha256'),
+            'profile':{k:profile[k] for k in ('profile_id','version_id','hash','name')} if profile else None,
+            'volume_settings':None,
+            'assignment_operation':project.get('assignment_operations',[])[-1]['id'] if project.get('assignment_operations') else None,
             'references': digest(project['references']),
             'documents': [{'id': d['id'], 'identifier': identifier(d, project), 'title': d['title'],
                            'filename': d['filename'], 'folder': d['folder'], 'revision': revision(project, d)} for d in project['documents']]}
@@ -27,7 +31,10 @@ def compare(old, new):
             'removed': [before[k]['title'] for k in before.keys()-after.keys()],
             'changed': [after[k]['title'] for k in after.keys() & before.keys() if after[k] != before[k]],
             'main_changed': old.get('main') != new['main'], 'references_changed': old.get('references') != new['references'],
-            'index_changed': old.get('submission_index') != new.get('submission_index') or old.get('index_files',[]) != new.get('index_files',[])}
+            'index_changed': old.get('submission_index') != new.get('submission_index') or old.get('index_files',[]) != new.get('index_files',[]),
+            'volumes_changed':old.get('volume_map_sha256')!=new.get('volume_map_sha256') or old.get('volume_files',[])!=new.get('volume_files',[]),
+            'profile_changed':old.get('profile')!=new.get('profile'),
+            'assignments_changed':old.get('assignment_operation')!=new.get('assignment_operation')}
 
 
 def list_exports(store, project):
@@ -44,7 +51,19 @@ def save_export(store, project, data):
         with ZipFile(BytesIO(data)) as archive:
             content['index_files'] = [{'path':n,'kind':'submission_index','sha256':sha256(archive.read(n)).hexdigest()}
                                      for n in archive.namelist() if n in ('Submission/Exhibit index.docx','Submission/Exhibit index.pdf')]
-    meta = {'id': mid, 'created_at': datetime.now(timezone.utc).isoformat(), 'sha256': sha256(data).hexdigest(),
+    with ZipFile(BytesIO(data)) as archive:
+        map_path='Submission/Volumes/Volume map.json'
+        if map_path in archive.namelist():
+            raw=archive.read(map_path);mapping=json.loads(raw)
+            content['volume_map_sha256']=sha256(raw).hexdigest()
+            content['volume_settings']=mapping['settings']
+            content['volume_files']=[{'path':'Submission/Volumes/'+v['file'],'pages':v['pages'],
+                                      'sha256':sha256(archive.read('Submission/Volumes/'+v['file'])).hexdigest()} for v in mapping['volumes']]
+    created=datetime.now(timezone.utc)
+    if previous:
+        last=datetime.fromisoformat(previous[0]['created_at'])
+        if created<=last:created=last+timedelta(microseconds=1)
+    meta = {'id': mid, 'created_at': created.isoformat(), 'sha256': sha256(data).hexdigest(),
             'size': len(data), 'manifest': content, 'changes': compare(previous[0]['manifest'] if previous else {}, content)}
     staging = parent / ('.pending-'+mid); staging.mkdir()
     # Incomplete staging directories are never visible in history.

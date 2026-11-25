@@ -160,6 +160,8 @@ class SetupTests(TestCase):
                       secret: {'state': 'available'}}
         result = json.dumps(diagnostics.report(components))
         self.assertNotIn(secret, result)
+        self.assertEqual(diagnostics.report(components)['capabilities']['project_schema'],4)
+        self.assertFalse(diagnostics.report(components)['capabilities']['word_required'])
         self.assertEqual(diagnostics.report(components)['components']['claude'], {'state': 'error'})
 
     def test_missing_converter_and_provider_login_are_actionable(self):

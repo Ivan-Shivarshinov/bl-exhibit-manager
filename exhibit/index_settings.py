@@ -48,7 +48,7 @@ def settings(project) -> IndexSettings:
 def save(store, project, value):
     from .schema import upgrade
     config = validate(value)
-    proposed = deepcopy(upgrade(store, project, target=3, persist=False))
+    proposed = deepcopy(upgrade(store, project, target=max(3,project['schema']), persist=False))
     proposed['submission_index'] = config
     store.save(proposed)
     return proposed

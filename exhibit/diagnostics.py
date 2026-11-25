@@ -31,6 +31,8 @@ def report(components):
     result = {'application': 'bl-exhibit-manager', 'version': __version__,
             'platform': system if system in ('Windows', 'Darwin', 'Linux') else 'Other',
             'architecture': arch if arch in ('amd64', 'x86_64', 'arm64', 'aarch64') else 'Other',
+            'capabilities': {'project_schema': 4, 'pdf_volumes': True, 'portable_profiles': True, 'assignment_updates': True,
+                             'word_required': False, 'converter_required_for_main_pdf': True},
             'components': {name: {'state': value.get('state') if isinstance(value.get('state'), str) and value.get('state') in STATES else 'error'}
                            for name, value in components.items() if name in ('converter', 'word', 'claude', 'codex')}}
     panel = components.get('word', {}).get('panel')

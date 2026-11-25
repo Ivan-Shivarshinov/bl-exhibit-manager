@@ -1,12 +1,15 @@
 import MaterialLibrary from './MaterialLibrary';
 import Setup from './Setup';
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import './style.css';
 import BatchDialog from './BatchDialog';
 import SubmissionFolders, {SubmissionTree} from './SubmissionFolders';
 import MainPdf from './MainPdf';
 import SubmissionIndex from './SubmissionIndex';
+import Volumes from './Volumes';
+import Profiles from './Profiles';
+import Assignments from './Assignments';
 import ProjectBackup from './ProjectBackup';
 import ReferenceScope from './ReferenceScope';
 import ReferenceAdd from './ReferenceAdd';
@@ -44,7 +47,10 @@ function App() {
   const [tab, setTab] = useState('docs'), [search, setSearch] = useState(''), [busy, setBusy] = useState('');
   const [error, setError] = useState(''), [notice, setNotice] = useState(''), [docDirty, setDirty] = useState(false), [styleDirty, setStyleDirty] = useState(false);
   const [indexDirty,setIndexDirty]=useState(false),[indexWorking,setIndexWorking]=useState(false),[indexPreview,setIndexPreview]=useState(null);
-  const dirty = docDirty || styleDirty || indexDirty;
+  const [volumeDirty,setVolumeDirty]=useState(false),[volumeWorking,setVolumeWorking]=useState(false);
+  const [profileWorking,setProfileWorking]=useState(false);
+  const [assignmentDirty,setAssignmentDirty]=useState(false),[assignmentWorking,setAssignmentWorking]=useState(false);
+  const dirty = docDirty || styleDirty || indexDirty || volumeDirty || assignmentDirty;
   const [online, setOnline] = useState(null), [loaded, setLoaded] = useState(false), [retry, setRetry] = useState(0);
   const [creating, setCreating] = useState(false), [newName, setNewName] = useState('');
   const [translation, setTranslation] = useState(null);
@@ -62,7 +68,7 @@ function App() {
   const visibleDocs = orderedDocs.filter(d=>`${d.identifier} ${d.title} ${d.folder}`.toLowerCase().includes(search.toLowerCase()));
   function openBatch(action, ids=orderedDocs.filter(d=>checked.includes(d.id)).map(d=>d.id)) { setError(''); setBatch({action,ids}); }
   async function refreshList() { const items = await api('/projects'); setProjects(items); return items; }
-  function accept(project) { setP(project); setRevision(r => r+1); try { localStorage.setItem('bl-exhibit-last-project-v1', project.id); } catch { /* Saving the project itself does not depend on browser storage. */ } }
+  const accept=useCallback(project=>{ setP(project); setRevision(r => r+1); try { localStorage.setItem('bl-exhibit-last-project-v1', project.id); } catch { /* Saving the project itself does not depend on browser storage. */ } },[]);
   useEffect(() => {
     let live = true, previous = null, timer;
     const check = async () => {
@@ -114,7 +120,7 @@ function App() {
     const project = await mutate('/ready-pdfs', {document_ids: checked}, 'Выбранные PDF будут использованы целиком, без изменений. Можно перейти к ссылкам в Word.');
     if (project) setChecked([]);
   }
-  const operationBusy = busy || (indexWorking ? 'Рассчитываем перечень…' : '') || (online !== true ? 'Нет связи' : '');
+  const operationBusy = busy || (indexWorking ? 'Рассчитываем перечень…' : '') || (volumeWorking ? 'Подготавливаем PDF-тома…' : '') || (profileWorking ? 'Проверяем профиль…' : '') || (assignmentWorking ? 'Проверяем назначения…' : '') || (online !== true ? 'Нет связи' : '');
   const disabled = Boolean(operationBusy || dirty || !loaded);
   return <>
     <div inert={Boolean(batch || creating || translation || backupOpen || setupOpen || libraryMode)}>
@@ -139,9 +145,12 @@ function App() {
       {tab === 'word' ? <WordWorkflow key={p.id} p={p} api={api} mutate={mutate} busy={operationBusy} onDirty={setDirty}/> : null}
       {tab === 'links' ? <Links error={error} clearError={()=>setError('')} p={p} busy={operationBusy} mutate={mutate} upload={upload} focusRef={focusRef}/> : null}
       {tab === 'export' ? <section className="export-page"><div><h1>Проверка перед сборкой</h1><p className="muted">В комплект войдут все загруженные приложения, в том числе не упомянутые в Word.</p></div>
-        <SubmissionIndex key={p.id} p={p} api={api} onSaved={accept} onDirty={setIndexDirty} onWorking={setIndexWorking} preview={indexPreview} onPreview={setIndexPreview} disabled={Boolean(busy||online!==true)}/>
+        <SubmissionIndex key={p.id} p={p} api={api} onSaved={accept} onDirty={setIndexDirty} onWorking={setIndexWorking} preview={indexPreview} onPreview={setIndexPreview} disabled={Boolean(busy||volumeWorking||profileWorking||assignmentWorking||docDirty||styleDirty||volumeDirty||assignmentDirty||online!==true)}/>
+        <Volumes key={'volumes-'+p.id} p={p} api={api} onSaved={accept} onDirty={setVolumeDirty} onWorking={setVolumeWorking} saveBlob={saveBlob} disabled={Boolean(busy||indexWorking||profileWorking||assignmentWorking||docDirty||styleDirty||indexDirty||assignmentDirty||online!==true)}/>
+        <Profiles key={'profiles-'+p.id} p={p} api={api} onSaved={accept} onWorking={setProfileWorking} saveBlob={saveBlob} disabled={Boolean(busy||indexWorking||volumeWorking||dirty||online!==true)}/>
+        <Assignments key={'assignments-'+p.id} p={p} api={api} onSaved={accept} onDirty={setAssignmentDirty} onWorking={setAssignmentWorking} disabled={Boolean(busy||indexWorking||volumeWorking||profileWorking||docDirty||styleDirty||indexDirty||volumeDirty||online!==true)}/>
         <div className="export-grid"><div><h2>{p.issues.length ? `Требуют внимания: ${p.issues.length}` : 'Блокирующих ошибок нет'}</h2>{p.issues.length ? <ul className="issues">{p.issues.map((issue, i) => <li key={i}><span className="issue-dot">!</span><div>{issue.message}<small>{p.documents.find(d => d.id === issue.document)?.title}</small></div><button disabled={Boolean(busy)} onClick={() => guard(() => { if (issue.document) { setSelected(issue.document); setTab('docs'); } else { setFocusRef(issue.reference); setTab('links'); } })}>Перейти</button></li>)}</ul> : <p className="success-note">Материалы проверены в инструменте. После экспорта проверьте комплект в Word и PDF-просмотрщике перед подачей.</p>}
-          <button className="primary" disabled={Boolean(operationBusy || dirty || p.issues.length || (p.submission_index_settings.enabled && (!indexPreview || indexPreview.stale || indexPreview.pid!==p.id || indexPreview.preview_token!==p.submission_index_fingerprint)))} onClick={() => run('Собираем подачу…', async () => { const blob = await api(`/projects/${p.id}/export`, {preview_token:indexPreview?.preview_token}, {blob: true}); saveBlob(blob, 'Submission.zip'); accept(await api('/projects/'+p.id)); setNotice('ZIP собран. Распакуйте весь комплект, сохранив структуру папок.'); })}>Собрать подачу · ZIP</button><p className="muted">{p.main?'Основной DOCX и PDF войдут в ZIP вместе с приложениями. Если PDF ещё не подготовлен, сборка создаст его автоматически.':'В ZIP войдут подготовленные приложения.'}</p>{p.main?<MainPdf onSetup={()=>setSetupOpen(true)} key={p.id} p={p} api={api} run={run} disabled={Boolean(operationBusy||dirty)}/>:null}</div>
+          <button className="primary" disabled={Boolean(operationBusy || dirty || p.issues.length || (p.submission_index_settings.enabled && (!indexPreview || indexPreview.stale || indexPreview.pid!==p.id || indexPreview.preview_token!==p.submission_index_fingerprint)))} onClick={() => run('Собираем подачу…', async () => { const blob = await api(`/projects/${p.id}/export`, {preview_token:indexPreview?.preview_token,without_volumes:true}, {blob: true}); saveBlob(blob, 'Submission.zip'); accept(await api('/projects/'+p.id)); setNotice('ZIP собран. Распакуйте весь комплект, сохранив структуру папок.'); })}>{p.volume_settings.enabled?'Скачать ZIP без томов':'Собрать подачу · ZIP'}</button><p className="muted">{p.main?'Основной DOCX и PDF войдут в ZIP вместе с приложениями. Если PDF ещё не подготовлен, сборка создаст его автоматически.':'В ZIP войдут подготовленные приложения.'}</p>{p.main?<MainPdf onSetup={()=>setSetupOpen(true)} key={p.id} p={p} api={api} run={run} disabled={Boolean(operationBusy||dirty)}/>:null}</div>
         <div><h2>Оформление подачи</h2><StyleForm style={p.style} onDirty={setStyleDirty} busy={operationBusy} onSave={style => mutate('/style', style)}/><p className="muted">В полях страницы штампы сохраняют размер и положение содержимого. Если места нет, измените отступы или выберите дополнительную полосу. После изменения оформления приложения требуют повторной проверки.</p><h2>Структура комплекта</h2><button disabled={disabled||!p.documents.length} onClick={()=>{setError('');setFoldersOpen(true);}}>Папки Submission</button><SubmissionTree documents={p.documents} main={p.main}/></div></div>
       <ExportHistory pid={p.id} revision={revision} api={api} run={run} disabled={disabled} saveBlob={saveBlob}/>
       </section> : null}

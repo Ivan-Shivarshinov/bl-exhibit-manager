@@ -99,9 +99,9 @@ class Desktop:
         finally:self.u.CloseClipboard()
 
 
-def page_origin(image,scale):
+def page_origin(image,scale,page_width=595.2756):
     """Find the actual white page, excluding titlebar/toolbar and grey canvas."""
-    rgb=image.convert('RGB');expected=595.2756*scale
+    rgb=image.convert('RGB');expected=page_width*scale
     for y in range(55,min(image.height-1,240)):
         run=None
         for x in range(image.width+1):

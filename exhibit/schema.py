@@ -2,7 +2,7 @@
 from copy import deepcopy
 from uuid import uuid4
 
-CURRENT = 3
+CURRENT = 4
 
 
 def provenance_schema(project):
@@ -17,7 +17,17 @@ def index_schema(project):
     return project
 
 
-UPGRADES = {1: provenance_schema, 2: index_schema}
+def volume_schema(project):
+    from .volume_settings import DEFAULT
+    project['schema'] = 4
+    project['volume_settings'] = deepcopy(DEFAULT)
+    project['applied_profile'] = None
+    project['assignment_operations'] = []
+    project['assignment_sources'] = []
+    return project
+
+
+UPGRADES = {1: provenance_schema, 2: index_schema, 3: volume_schema}
 
 
 def check_version(version):
